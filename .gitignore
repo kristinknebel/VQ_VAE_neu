@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.ipynb_checkpoints/
+data/
+ptb-xl-*/
+*.zip
+*.npy
+*.pkl
+*.html
+*.png
+.DS_Store
