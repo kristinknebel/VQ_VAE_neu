@@ -1,5 +1,4 @@
 # src/main.py
-
 import sys
 print("Python Executable:", sys.executable)
 print("Python Version:", sys.version)
@@ -7,12 +6,36 @@ print("sys.path:")
 for p in sys.path:
     print(f"  {p}")
 
-from src import config
-from src.experiment import start_run
+import os
+import json
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")  # wichtig auf Servern ohne Display
+import matplotlib.pyplot as plt
 
-# 1) Parameter-Dict für den Snapshot (alles, was du später nachvollziehen willst)
+from . import config
+from .experiment import start_run
+
+# Daten & Preprocessing
+from .data_loader import load_scp_codes, get_scp_code_list
+from .preprocessing import create_snippets, batch_process_relevant_ecgs
+
+# Modell & Training
+from .models import VQVAE, train_and_evaluate_vqvae
+
+# Visualisierung & Analyse
+from .visualization import (
+    visualize_latent_space,
+    plot_ecg_reconstructions,
+    visualize_codebook_embeddings,
+    analyze_codebook_usage,
+)
+
+# ---------------------------------------------------------------------
+# 1) Run-Parameter erfassen & Run starten
+# ---------------------------------------------------------------------
 params = {
-    "LATENT_DIM": getattr(config, "LATENT_DIM", None),
+    "LATENT_DIMENSIONS_TO_TEST": getattr(config, "LATENT_DIMENSIONS_TO_TEST", None),
     "NUM_EMBEDDINGS": getattr(config, "NUM_EMBEDDINGS", None),
     "COMMITMENT_COST": getattr(config, "COMMITMENT_COST", None),
     "LEARNING_RATE": getattr(config, "LEARNING_RATE", None),
@@ -21,162 +44,169 @@ params = {
     "SAMPLING_RATE": getattr(config, "SAMPLING_RATE", None),
     "SNIPPET_LENGTH_BEFORE_R": getattr(config, "SNIPPET_LENGTH_BEFORE_R", None),
     "SNIPPET_LENGTH_AFTER_R": getattr(config, "SNIPPET_LENGTH_AFTER_R", None),
-    # gerne erweitern: Datenquelle, Split, Filter, Label-Set etc.
+    "VIS_N_COMPONENTS": getattr(config, "VIS_N_COMPONENTS", None),
+    "VIS_METHOD": getattr(config, "VIS_METHOD", None),
+    "DATA_DIR": str(getattr(config, "DATA_DIR", "")),
 }
 
-# 2) Run starten
 run = start_run(params, base_dir="runs", seed=42)
+print(f" Neuer Trainingslauf: {run.run_dir}")
 
-# 3) Callbacks in fit() einhängen
-callbacks = run.callbacks(monitor="val_loss", patience=8)
-
-history = model.fit(
-    train_dataset,
-    validation_data=val_dataset,
-    epochs=config.AE_EPOCHS,
-    callbacks=callbacks,
-    # batch_size=config.AE_BATCH_SIZE  # falls du tf.data nutzt, entfällt das
+# ---------------------------------------------------------------------
+# 2) Relevante Dateien finden & Labels laden
+# ---------------------------------------------------------------------
+print("Suche relevante PTB-XL-Dateien…")
+filepath_list = batch_process_relevant_ecgs(
+    config.DATA_DIR, config.RELEVANT_ECG_PATH, config.DATABASE_PATH
 )
+print(f"→ {len(filepath_list)} Dateien gefunden (vor evtl. Teilmenge).")
 
+ecg_id_to_scp_str = load_scp_codes(config.RELEVANT_ECG_PATH)
+ecg_id_to_scp_list = {ecg_id: get_scp_code_list(s)
+                      for ecg_id, s in ecg_id_to_scp_str.items()}
 
-
-
-
-
-import numpy as np
-from sklearn.model_selection import train_test_split
-import os
-import matplotlib.pyplot as plt # Import für plt.show()
-
-# --- IMPORTS ANPASSEN ---
-from .config import (DATA_DIR, RELEVANT_ECG_PATH, DATABASE_PATH,
-    SAMPLING_RATE, SNIPPET_LENGTH_BEFORE_R, SNIPPET_LENGTH_AFTER_R,
-    LATENT_DIMENSIONS_TO_TEST, AE_EPOCHS, AE_BATCH_SIZE, # Alte AE-Parameter
-    NUM_EMBEDDINGS, COMMITMENT_COST,LEARNING_RATE, # NEUE VQ-VAE Parameter
-    VIS_N_COMPONENTS, VIS_METHOD) # Visualisierungsparameter aus config
-
-from .data_loader import load_scp_codes, get_scp_code_list
-from .preprocessing import create_snippets, batch_process_relevant_ecgs
-
-# NEUE IMPORTS FÜR VQ-VAE
-from .models import VQVAE, train_and_evaluate_vqvae # Importieren Sie VQVAE und die neue Trainingsfunktion
-from .visualization import visualize_latent_space, plot_ecg_reconstructions, visualize_codebook_embeddings # Neue Visualisierungsfunktionen
-
-
-#
-# Definiere String mit allen Parametern
-
-
-
-
-
-# --- DATENLADE- UND VORVERARBEITUNG (BLEIBT GLEICH) ---
-filepath_list = batch_process_relevant_ecgs(DATA_DIR, RELEVANT_ECG_PATH, DATABASE_PATH)
-
-# sortierte Liste der SCP-Codes erhalten
-ecg_id_to_scp_str = load_scp_codes(RELEVANT_ECG_PATH)
-ecg_id_to_scp_list = {ecg_id: get_scp_code_list(scp_string)
-                        for ecg_id, scp_string in ecg_id_to_scp_str.items()}
-
+# ---------------------------------------------------------------------
+# 3) Snippets extrahieren (Teilmenge für Testläufe)
+# ---------------------------------------------------------------------
 all_snippets = []
 all_ecg_ids = []
-all_scp_labels_raw = [] # Unveränderte Labels
+all_scp_labels_raw = []
 
-# Begrenzung für Testzwecke beibehalten, aber beachten, dass dies die Datenmenge stark reduziert
-# Für ernsthaftes Training sollten Sie dies entfernen oder erhöhen.
-# Sie müssen hier möglicherweise auch eine Obergrenze für die Anzahl der gesamten Snippets einführen,
-# da die Gesamtzahl der Snippets aus allen Dateien sehr groß werden kann.
-# Eine Alternative ist, nur eine Teilmenge der `filepath_list` zu verarbeiten
-# oder die Verarbeitung in Batches durchzuführen, wenn der Speicher knapp wird.
-for filepath in filepath_list[:1000]: # Begrenzung für Testzwecke beibehalten
-    snippets, ecg_ids, scp_labels = create_snippets(filepath, ecg_id_to_scp_list, SAMPLING_RATE, SNIPPET_LENGTH_BEFORE_R, SNIPPET_LENGTH_AFTER_R)
-    
-    if snippets is not None:
+MAX_FILES = 1000  # kleine Begrenzung für schnellere Test-Runs
+print(f" Extrahiere Snippets aus bis zu {MAX_FILES} Dateien…")
+for filepath in filepath_list[:MAX_FILES]:
+    snippets, ecg_ids, scp_labels = create_snippets(
+        filepath, ecg_id_to_scp_list,
+        config.SAMPLING_RATE,
+        config.SNIPPET_LENGTH_BEFORE_R,
+        config.SNIPPET_LENGTH_AFTER_R,
+    )
+    if snippets is not None and len(snippets) > 0:
         all_snippets.extend(snippets)
         all_ecg_ids.extend(ecg_ids)
-        all_scp_labels_raw.extend(scp_labels) # Füge die rohen Labels hinzu
+        all_scp_labels_raw.extend(scp_labels)
 
 if not all_snippets:
-    print("Keine Snippets zur Verarbeitung gefunden. Stellen Sie sicher, dass die Dateipfade korrekt sind und Snippets extrahiert werden können.")
-else:
-    all_snippets = np.array(all_snippets)
-    all_ecg_ids = np.array(all_ecg_ids)
-    all_scp_labels_raw = np.array(all_scp_labels_raw)
+    print("Keine Snippets gefunden. Prüfe Pfade/Preprocessing.")
+    sys.exit(0)
 
-    # Filtere die Daten, um nur Snippets mit einem einzigen SCP-Code zu behalten
-    # Dies ist für die Visualisierung gut, aber das Training sollte auf allen Daten erfolgen.
-    single_label_indices = [i for i, label in enumerate(all_scp_labels_raw) if label.count('-') == 0]
-    single_label_snippets = all_snippets[single_label_indices]
-    single_label_labels = all_scp_labels_raw[single_label_indices]
+all_snippets = np.array(all_snippets)
+all_ecg_ids = np.array(all_ecg_ids)
+all_scp_labels_raw = np.array(all_scp_labels_raw)
 
-    snippet_length, num_channels = all_snippets.shape[1], all_snippets.shape[2]
-    print(f"Form der extrahierten Snippets: (Anzahl, Länge={snippet_length}, Kanäle={num_channels})")
-    print(f"Anzahl der extrahierten SCP-Labels (roh): {len(all_scp_labels_raw)}")
-    print(f"Anzahl der Snippets mit einzelnem Label für Visualisierung: {len(single_label_labels)}")
+snippet_length, num_channels = all_snippets.shape[1], all_snippets.shape[2]
+print(f"Snippets: {all_snippets.shape} (Länge={snippet_length}, Kanäle={num_channels})")
+print(f"Anzahl Labels (roh): {len(all_scp_labels_raw)}")
 
-    # Daten aufteilen für das Training mit allen Labels
-    # `stratify` ist wichtig für unbalancierte Datensätze, stellt sicher, dass Klassenanteile in Train/Test gleich sind
-    train_snippets, test_snippets, _, _, train_labels_for_stratify, test_labels_for_stratify = train_test_split(
-        all_snippets, all_ecg_ids, all_scp_labels_raw, test_size=0.2, random_state=42, stratify=all_scp_labels_raw
+# Für Visualisierung: nur Single-Label-Snippets (dein Kriterium)
+single_label_indices = [i for i, label in enumerate(all_scp_labels_raw) if label.count('-') == 0]
+single_label_snippets = all_snippets[single_label_indices]
+single_label_labels = all_scp_labels_raw[single_label_indices]
+print(f"   Single-Label-Snippets für Visualisierung: {len(single_label_labels)}")
+
+# ---------------------------------------------------------------------
+# 4) Train/Test-Split (stratifiziert nach Label)
+# ---------------------------------------------------------------------
+from sklearn.model_selection import train_test_split
+train_snippets, test_snippets, labels_train, labels_test = train_test_split(
+    all_snippets, all_scp_labels_raw,
+    test_size=0.2, random_state=42, stratify=all_scp_labels_raw
+)
+input_shape = (train_snippets.shape[1], train_snippets.shape[2])
+print(f"Split: train={train_snippets.shape[0]} / test={test_snippets.shape[0]}")
+
+# ---------------------------------------------------------------------
+# 5) VQ-VAE Training(s)
+# ---------------------------------------------------------------------
+latent_dimensions_to_test = getattr(config, "LATENT_DIMENSIONS_TO_TEST", [32])
+trained_vq_vaes = {}
+
+for latent_dim in latent_dimensions_to_test:
+    print(f"\n--- Training VQ-VAE: Latent {latent_dim}, Codebook {config.NUM_EMBEDDINGS}, β={config.COMMITMENT_COST} ---")
+    # Erwartete Signatur deiner Funktion:
+    # train_and_evaluate_vqvae(train_snip, test_snip, input_shape, latent_dim,
+    #                          num_embeddings, commitment_cost, epochs, batch_size)
+    vq_vae_model, history, total_loss = train_and_evaluate_vqvae(
+        train_snippets, test_snippets, input_shape, latent_dim,
+        config.NUM_EMBEDDINGS, config.COMMITMENT_COST,
+        config.AE_EPOCHS, config.AE_BATCH_SIZE
     )
-    # Beachten Sie, dass `all_ecg_ids` und `all_scp_labels_raw` im `train_test_split` verwendet werden,
-    # aber Sie benötigen nur `train_snippets` und `test_snippets` für den VAE selbst.
-    # Die `test_labels_for_stratify` werden für die Visualisierung verwendet.
+    trained_vq_vaes[latent_dim] = vq_vae_model
 
-    input_shape = (train_snippets.shape[1], train_snippets.shape[2])
-    latent_dimensions_to_test = LATENT_DIMENSIONS_TO_TEST
-    trained_vq_vaes = {} # Dictionary um VQ-VAE Modelle zu speichern
+    # History speichern (falls verfügbar)
+    try:
+        h = history.history if hasattr(history, "history") else history
+        with open(run.run_dir / f"history_LD{latent_dim}.json", "w") as f:
+            json.dump(h, f, indent=2)
+    except Exception:
+        pass
 
-    # --- VQ-VAE TRAINING LOOP ANPASSEN ---
-    for latent_dim in latent_dimensions_to_test:
-        print(f"\n--- Training VQ-VAE mit Latenz-Dimension: {latent_dim}, Codebook-Größe: {NUM_EMBEDDINGS} ---")
-        # Aufruf der neuen VQ-VAE spezifischen Trainingsfunktion
-        vq_vae_model, history, total_loss = train_and_evaluate_vqvae(
-            train_snippets, test_snippets, input_shape, latent_dim,
-            NUM_EMBEDDINGS, COMMITMENT_COST, AE_EPOCHS, AE_BATCH_SIZE) 
-        trained_vq_vaes[latent_dim] = vq_vae_model
+# ---------------------------------------------------------------------
+# 6) Visualisierung & Codebook-Analyse mit gewählter LD
+# ---------------------------------------------------------------------
+VIS_METHOD = getattr(config, "VIS_METHOD", "TSNE")
+VIS_N_COMPONENTS = getattr(config, "VIS_N_COMPONENTS", 3)
 
-    # --- VISUALISIERUNG ANPASSEN ---
-    # Hier verwenden wir das Modell für die größte getestete Dimension, falls vorhanden.
-    # Stellen Sie sicher, dass diese Dimension auch wirklich getestet wurde.
-    if 32 in trained_vq_vaes: # Überprüfen, ob das Modell für LD x existiert
-        chosen_latent_dim = 32 #evtl. anpassen, wenn man doch Liste für latent dims nimmt
-        params_str = (
-            f"LD{chosen_latent_dim}_Emb{NUM_EMBEDDINGS}_Cost{COMMITMENT_COST}_LR{LEARNING_RATE:.0e}_"
-            f"Epochs{AE_EPOCHS}_Batch{AE_BATCH_SIZE}"
-        )
-        print("Parameter:"+params_str)
-        chosen_vq_vae_model = trained_vq_vaes[chosen_latent_dim] # Nehmen Sie das trainierte VQ-VAE Modell
+# Nutze LD=32 falls trainiert, sonst die erste verfügbare
+chosen_latent_dim = 32 if 32 in trained_vq_vaes else next(iter(trained_vq_vaes.keys()))
+chosen_vq_vae_model = trained_vq_vaes[chosen_latent_dim]
 
-        # Rekonstruktionen visualisieren
-        print("\nVisualisiere EKG-Rekonstruktionen...")
-        reconstructed_test_snippets = chosen_vq_vae_model.predict(test_snippets)
-        plot_ecg_reconstructions(test_snippets, reconstructed_test_snippets, num_examples=5, filename = f"32_ecg_reconstruction_{params_str}.png")
+params_str = (
+    f"LD{chosen_latent_dim}_Emb{config.NUM_EMBEDDINGS}_"
+    f"Cost{config.COMMITMENT_COST}_LR{config.LEARNING_RATE:.0e}_"
+    f"Epochs{config.AE_EPOCHS}_Batch{config.AE_BATCH_SIZE}"
+)
+print("Parameter:", params_str)
 
-        # Visualisierung des quantisierten Latent-Raums für einzelne Labels
-        if len(single_label_labels) > 0: # Prüfen, ob überhaupt Single Labels vorhanden sind
-            print("Visualisiere quantisierten Latent-Raum für einzelne Labels...")
-            visualize_latent_space(
-                chosen_vq_vae_model, # Das VQ-VAE Modell übergeben
-                single_label_snippets, # Nur Snippets mit einzelnen Labels
-                single_label_labels,   # Und deren Labels
-                n_components=VIS_N_COMPONENTS,
-                method=VIS_METHOD, filename = f"VQ-VAE_3d_latent_space_quantized_{method}_{params_str}.html", params_info = params_str
-            )
-            print("Visualisierung Latent-Raum abgeschlossen.")
-        else:
-            print("Keine Snippets mit einzelnen Labels zum Visualisieren des Latent-Raums vorhanden.")
+# (a) Rekonstruktionen
+print("\n Visualisiere EKG-Rekonstruktionen…")
+reconstructed_test_snippets = chosen_vq_vae_model.predict(test_snippets, verbose=0)
+plot_ecg_reconstructions(
+    test_snippets, reconstructed_test_snippets, num_examples=5,
+    filename=str(run.run_dir / f"ecg_reconstruction_{params_str}.png")
+)
 
-        # Visualisierung der Codebook-Embeddings
-        print("Visualisiere Codebook-Embeddings...")
-        visualize_codebook_embeddings(
-            chosen_vq_vae_model.vq_layer, # Zugriff auf die VQ-Layer Instanz
-            n_components=VIS_N_COMPONENTS,
-            method=VIS_METHOD,
-            filename = "codebooks_embeddings_{method}_{params_str}.html", params_info = params_str)
-        plt.show() # Zeigt alle generierten Plots an (falls nicht bereits durch plotly.show() behandelt)
+# (b) Latent-Space (nur Single-Label, wenn vorhanden)
+if len(single_label_labels) > 0:
+    print("Visualisiere quantisierten Latent-Raum…")
+    visualize_latent_space(
+        chosen_vq_vae_model,
+        single_label_snippets,
+        single_label_labels,
+        n_components=VIS_N_COMPONENTS,
+        method=VIS_METHOD,
+        filename=str(run.run_dir / f"VQ-VAE_3d_latent_space_quantized_{VIS_METHOD}_{params_str}.html"),
+        params_info=params_str,
+    )
+else:
+    print("Keine Single-Label-Snippets für die Latentraum-Visualisierung vorhanden.")
 
-    else:
-        print(f"Modell für Latenzdimension 32 wurde nicht trainiert oder gefunden. Keine Visualisierung des Latent-Raums.")
+# (c) Codebook-Embeddings
+print("Visualisiere Codebook-Embeddings…")
+visualize_codebook_embeddings(
+    chosen_vq_vae_model.vq_layer,
+    n_components=VIS_N_COMPONENTS,
+    method=VIS_METHOD,
+    filename=str(run.run_dir / f"codebooks_embeddings_{VIS_METHOD}_{params_str}.html"),
+    params_info=params_str,
+)
 
-print(f"Code ist erfolgreich durchgelaufen.")
+# (d) Codebook-Nutzung pro Run speichern
+print("Analysiere Codebook-Nutzung…")
+stats = analyze_codebook_usage(chosen_vq_vae_model, (x for x in [test_snippets]), max_batches=1, plot=False)
+with open(run.run_dir / "codebook_usage.json", "w") as f:
+    json.dump({k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in stats.items()}, f, indent=2)
+
+plt.figure(figsize=(10, 4))
+plt.bar(stats["unique_indices"], stats["counts"], color="steelblue")
+plt.title(f"Codebook-Nutzung: {len(stats['unique_indices'])}/{stats['num_embeddings']}")
+plt.xlabel("Index"); plt.ylabel("Häufigkeit"); plt.tight_layout()
+plt.savefig(run.run_dir / "codebook_usage.png", dpi=150)
+plt.close()
+
+print(
+    f"Codebook-Analyse: {len(stats['unique_indices'])}/{stats['num_embeddings']} "
+    f"({stats['utilization']*100:.1f}% genutzt). Dateien im Run-Ordner."
+)
+
+print("Code ist erfolgreich durchgelaufen.")
