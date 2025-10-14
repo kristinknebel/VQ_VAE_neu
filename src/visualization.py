@@ -6,9 +6,11 @@ from sklearn.manifold import TSNE
 import umap
 import numpy as np
 import tensorflow as tf # TensorFlow ist jetzt hier notwendig für tf.gather und tf.reshape
+from typing import Optional, Dict, Any, Tuple, Iterable
 from .config import CATEGORY_COLORS # Sicherstellen, dass dies korrekt ist, ggf. direkt die Farben definieren
 # from .models import VQVAE # Importieren Sie Ihre VQVAE-Klasse, falls Sie sie für Typ-Hints benötigen.
 #                         # In der Regel übergeben Sie eine Instanz, so dass der direkte Import nicht zwingend ist.
+
 
 
 # ---- Funktion zur Visualisierung des Latenzraums ----
@@ -238,3 +240,201 @@ def visualize_codebook_embeddings(vq_layer, n_components=3, method='TSNE', filen
     )
     fig.update_layout(layout)
     fig.write_html(filename)
+
+# === Codebook-Analyse für VQ-VAE (TensorFlow/Keras) ===
+
+def _find_encoder(model: tf.keras.Model) -> tf.keras.Model:
+    # 1) bevorzugt: Attribut
+    if hasattr(model, "encoder") and isinstance(model.encoder, tf.keras.Model):
+        return model.encoder
+    # 2) Try by name
+    try:
+        return model.get_layer("encoder")
+    except Exception:
+        pass
+    # 3) Fallback: komplette Vorwärtsrechnung nutzen und vor dem VQ layer tap-in (nicht trivial)
+    raise AttributeError(
+        "Konnte keinen Encoder finden. Erwarte model.encoder oder eine Layer mit Namen 'encoder'."
+    )
+
+def _find_vq_layer(model: tf.keras.Model) -> tf.keras.layers.Layer:
+    # 1) direkte Attribute, die oft benutzt werden
+    for attr in ("vq_layer", "quantizer", "vq", "vector_quantizer"):
+        if hasattr(model, attr):
+            return getattr(model, attr)
+    # 2) nach Layer-Typname/-Name suchen
+    for layer in model.layers:
+        name = layer.name.lower()
+        cls = layer.__class__.__name__.lower()
+        if "vectorquantizer" in cls or "vectorquantizer" in name or "vq" in name:
+            return layer
+    # 3) tiefer in Submodels schauen
+    for layer in model.layers:
+        if isinstance(layer, tf.keras.Model):
+            try:
+                return _find_vq_layer(layer)
+            except Exception:
+                continue
+    raise AttributeError("Konnte keinen VQ-Layer finden (z. B. 'vq_layer', 'VectorQuantizer').")
+
+def _get_codebook_matrix(vq_layer: tf.keras.layers.Layer) -> tf.Tensor:
+    """
+    Versucht, die Codebook-Matrix (K x D) zu extrahieren.
+    Häufige Namen: 'embedding', 'embeddings', 'codebook'.
+    """
+    # Keras-Layer.weights: Liste tf.Variable; häufig Name enthält 'embedding'
+    cand_vars = []
+    for w in vq_layer.weights:
+        n = w.name.lower()
+        if any(k in n for k in ("embedding", "embeddings", "codebook")) and len(w.shape) == 2:
+            cand_vars.append(w)
+    if cand_vars:
+        # wähle die erste 2D-Matrix
+        return cand_vars[0].read_value()
+    # Manche Implementationen halten das Codebook als Attribut
+    for attr in ("embedding", "embeddings", "codebook", "codebook_embedding"):
+        if hasattr(vq_layer, attr):
+            var = getattr(vq_layer, attr)
+            if isinstance(var, (tf.Variable, tf.Tensor)) and len(var.shape) == 2:
+                return tf.convert_to_tensor(var)
+    raise AttributeError("Codebook-Matrix (KxD) nicht gefunden.")
+
+def _vq_forward_indices(vq_layer, z_e: tf.Tensor) -> Optional[tf.Tensor]:
+    """
+    Ruft den VQ-Layer auf und versucht, Indizes zu erhalten.
+    Erwartete Rückgaben (je nach Implementierung):
+      - (z_q, indices) oder (z_q, indices, aux)
+      - dict mit Schlüssel 'indices' oder 'encoding_indices'
+      - nur z_q (dann None → später selbst berechnen)
+    """
+    out = vq_layer(z_e, training=False)
+    # Tupel-Varianten
+    if isinstance(out, (tuple, list)):
+        # finde erstes Tensor-Ähnliche mit ganzzahligem dtype als Indices
+        for item in out[1:]:
+            if tf.is_tensor(item) and item.dtype.is_integer:
+                return tf.cast(item, tf.int32)
+        # manchmal ist ein dict im Tupel
+        for item in out:
+            if isinstance(item, dict):
+                for k in ("indices", "encoding_indices", "codes"):
+                    if k in item:
+                        t = item[k]
+                        if tf.is_tensor(t):
+                            return tf.cast(t, tf.int32)
+        return None
+    # Dict-Variante
+    if isinstance(out, dict):
+        for k in ("indices", "encoding_indices", "codes"):
+            if k in out and tf.is_tensor(out[k]):
+                return tf.cast(out[k], tf.int32)
+        return None
+    # Nur Tensor zurück → keine Indices
+    return None
+
+def _nearest_code_indices_manual(E: tf.Tensor, z_e: tf.Tensor, chunk: int = 32768) -> tf.Tensor:
+    """
+    Fallback: berechnet Indizes manuell über nächste Codebook-Vektoren.
+    E: (K, D), z_e: (..., D) -> flach zu (N, D)
+    Chunking, um Speicher zu sparen.
+    """
+    z = tf.reshape(z_e, [-1, tf.shape(z_e)[-1]])  # (N, D)
+    K = tf.shape(E)[0]
+    N = tf.shape(z)[0]
+
+    idx_all = []
+    start = tf.constant(0)
+    while True:
+        end = tf.minimum(start + chunk, N)
+        z_chunk = z[start:end]                   # (n, D)
+        # d^2 = ||z||^2 + ||E||^2 - 2 z E^T
+        zz = tf.reduce_sum(tf.square(z_chunk), axis=1, keepdims=True)      # (n,1)
+        EE = tf.reduce_sum(tf.square(E), axis=1, keepdims=True)            # (K,1)
+        # (n,K)
+        d2 = zz + tf.transpose(EE) - 2.0 * tf.linalg.matmul(z_chunk, E, transpose_b=True)
+        idx = tf.argmin(d2, axis=1, output_type=tf.int32)                  # (n,)
+        idx_all.append(idx)
+        if tf.equal(end, N):
+            break
+        start = end
+    return tf.concat(idx_all, axis=0)  # (N,)
+
+def analyze_codebook_usage(
+    model: tf.keras.Model,
+    dataset: Iterable,
+    max_batches: Optional[int] = 50,
+    plot: bool = True,
+) -> Dict[str, Any]:
+    """
+    Analysiert, wie viele Codebook-Einträge genutzt werden und wie gleichmäßig.
+    - model: dein VQ-VAE Keras-Modell (mit model.encoder und einem VQ-Layer)
+    - dataset: tf.data.Dataset oder beliebiger (x, y)-Iterator
+    - max_batches: Anzahl ausgewerteter Batches (None = alle)
+    - plot: Balkendiagramm der Häufigkeiten zeichnen
+
+    Rückgabe:
+      {
+        'unique_indices': np.ndarray shape (U,),             # verwendete Indizes
+        'counts': np.ndarray shape (U,),                     # Häufigkeiten pro Index
+        'utilization': float,                                # U / K
+        'num_embeddings': int,                               # K
+        'total_assignments': int,                            # Summe counts
+      }
+    """
+    enc = _find_encoder(model)
+    vq = _find_vq_layer(model)
+    E = _get_codebook_matrix(vq)            # (K, D)
+    K = int(E.shape[0])
+
+    used_indices = []
+
+    @tf.function(reduce_retracing=True)
+    def _enc_call(x):
+        return enc(x, training=False)
+
+    it = iter(dataset)
+    b = 0
+    while True:
+        if max_batches is not None and b >= max_batches:
+            break
+        try:
+            batch = next(it)
+        except StopIteration:
+            break
+        x = batch[0] if isinstance(batch, (tuple, list)) else batch
+        z_e = _enc_call(tf.convert_to_tensor(x))
+
+        # 1) Versuche, Indizes direkt vom VQ-Layer zu bekommen
+        idx = _vq_forward_indices(vq, z_e)
+        if idx is None:
+            # 2) Sonst manuell via nächstem Codebook-Vektor
+            idx = _nearest_code_indices_manual(E, z_e)
+
+        idx_np = idx.numpy().ravel()
+        used_indices.append(idx_np)
+        b += 1
+
+    if not used_indices:
+        raise RuntimeError("Dataset lieferte keine Batches oder Batches sind leer.")
+
+    indices = np.concatenate(used_indices, axis=0)
+    unique, counts = np.unique(indices, return_counts=True)
+    utilization = float(len(unique)) / float(K)
+    total = int(counts.sum())
+
+    if plot:
+        plt.figure(figsize=(10, 4))
+        plt.bar(unique, counts)
+        plt.xlabel("Codebook-Index")
+        plt.ylabel("Häufigkeit")
+        plt.title(f"Codebook-Nutzung: {len(unique)}/{K} aktiv ({utilization*100:.1f}%)")
+        plt.tight_layout()
+        plt.show()
+
+    return {
+        "unique_indices": unique,
+        "counts": counts,
+        "utilization": utilization,
+        "num_embeddings": K,
+        "total_assignments": total,
+    }
