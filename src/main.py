@@ -151,7 +151,7 @@ else:
         # Rekonstruktionen visualisieren
         print("\nVisualisiere EKG-Rekonstruktionen...")
         reconstructed_test_snippets = chosen_vq_vae_model.predict(test_snippets)
-        plot_ecg_reconstructions(test_snippets, reconstructed_test_snippets, num_examples=5, filename = "32_ecg_reconstruction_{params_str}.png")
+        plot_ecg_reconstructions(test_snippets, reconstructed_test_snippets, num_examples=5, filename = f"32_ecg_reconstruction_{params_str}.png")
 
         # Visualisierung des quantisierten Latent-Raums für einzelne Labels
         if len(single_label_labels) > 0: # Prüfen, ob überhaupt Single Labels vorhanden sind
@@ -161,7 +161,7 @@ else:
                 single_label_snippets, # Nur Snippets mit einzelnen Labels
                 single_label_labels,   # Und deren Labels
                 n_components=VIS_N_COMPONENTS,
-                method=VIS_METHOD, filename = "VQ-VAE_3d_latent_space_quantized_{method}_{params_str}.html", params_info = params_str
+                method=VIS_METHOD, filename = f"VQ-VAE_3d_latent_space_quantized_{method}_{params_str}.html", params_info = params_str
             )
             print("Visualisierung Latent-Raum abgeschlossen.")
         else:
