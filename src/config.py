@@ -6,7 +6,7 @@ import os
 BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # --- Konfiguration der Dateipfade ---
-DATA_DIR = os.path.join(BASE_PATH,'ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3')
+DATA_DIR = os.path.join(BASE_PATH,'data','ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3')
 RELEVANT_ECG_PATH = os.path.join(DATA_DIR, 'ekg_zu_scp_codes.csv')
 DATABASE_PATH = os.path.join(DATA_DIR, 'ptbxl_database.csv') #database table 
 

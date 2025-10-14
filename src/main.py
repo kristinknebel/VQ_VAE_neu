@@ -7,6 +7,42 @@ print("sys.path:")
 for p in sys.path:
     print(f"  {p}")
 
+from src import config
+from src.experiment import start_run
+
+# 1) Parameter-Dict für den Snapshot (alles, was du später nachvollziehen willst)
+params = {
+    "LATENT_DIM": getattr(config, "LATENT_DIM", None),
+    "NUM_EMBEDDINGS": getattr(config, "NUM_EMBEDDINGS", None),
+    "COMMITMENT_COST": getattr(config, "COMMITMENT_COST", None),
+    "LEARNING_RATE": getattr(config, "LEARNING_RATE", None),
+    "AE_BATCH_SIZE": getattr(config, "AE_BATCH_SIZE", None),
+    "AE_EPOCHS": getattr(config, "AE_EPOCHS", None),
+    "SAMPLING_RATE": getattr(config, "SAMPLING_RATE", None),
+    "SNIPPET_LENGTH_BEFORE_R": getattr(config, "SNIPPET_LENGTH_BEFORE_R", None),
+    "SNIPPET_LENGTH_AFTER_R": getattr(config, "SNIPPET_LENGTH_AFTER_R", None),
+    # gerne erweitern: Datenquelle, Split, Filter, Label-Set etc.
+}
+
+# 2) Run starten
+run = start_run(params, base_dir="runs", seed=42)
+
+# 3) Callbacks in fit() einhängen
+callbacks = run.callbacks(monitor="val_loss", patience=8)
+
+history = model.fit(
+    train_dataset,
+    validation_data=val_dataset,
+    epochs=config.AE_EPOCHS,
+    callbacks=callbacks,
+    # batch_size=config.AE_BATCH_SIZE  # falls du tf.data nutzt, entfällt das
+)
+
+
+
+
+
+
 import numpy as np
 from sklearn.model_selection import train_test_split
 import os
