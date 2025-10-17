@@ -104,6 +104,34 @@ single_label_snippets = all_snippets[single_label_indices]
 single_label_labels = all_scp_labels_raw[single_label_indices]
 print(f"   Single-Label-Snippets für Visualisierung: {len(single_label_labels)}")
 
+
+# ---------------------------------------------------------------------
+# 3,5) Test, wie Snippets aussehen
+# ---------------------------------------------------------------------
+print("\nBeispielhafte Original-Snippets (ungefiltert):")
+
+num_examples = 10
+example_indices = np.random.choice(len(all_snippets), size=num_examples, replace=False)
+
+plt.figure(figsize=(12, 8))
+for i, idx in enumerate(example_indices):
+    snippet = all_snippets[idx]
+
+    # Falls das Snippet mehrkanalig ist (z. B. 12 Kanäle)
+    if snippet.ndim == 2:
+        plt.subplot(num_examples, 1, i + 1)
+        # z.B. Kanal I anzeigen (index 0)
+        plt.plot(snippet[:, 0], label=f"ECG_ID={all_ecg_ids[idx]}, Label={all_scp_labels_raw[idx]}")
+        plt.legend(loc="upper right", fontsize="small")
+    else:
+        plt.subplot(num_examples, 1, i + 1)
+        plt.plot(snippet, label=f"ECG_ID={all_ecg_ids[idx]}, Label={all_scp_labels_raw[idx]}")
+        plt.legend(loc="upper right", fontsize="small")
+
+plt.subtitle("Beispiele: Originale EKG-Snippets", fontsize=14)
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+plt.show()
+
 # ---------------------------------------------------------------------
 # 4) Train/Test-Split (stratifiziert nach Label)
 # ---------------------------------------------------------------------
