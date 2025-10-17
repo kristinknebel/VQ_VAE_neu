@@ -128,7 +128,7 @@ for i, idx in enumerate(example_indices):
         plt.plot(snippet, label=f"ECG_ID={all_ecg_ids[idx]}, Label={all_scp_labels_raw[idx]}")
         plt.legend(loc="upper right", fontsize="small")
 
-plt.subtitle("Beispiele: Originale EKG-Snippets", fontsize=14)
+plt.suptitle("Beispiele: Originale EKG-Snippets", fontsize=14)
 plt.tight_layout(rect=[0, 0, 1, 0.96])
 plt.show()
 
