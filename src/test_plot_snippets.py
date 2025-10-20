@@ -52,7 +52,7 @@ params = {
 run = start_run(params, base_dir="runs", seed=42)
 print(f" Neuer Trainingslauf: {run.run_dir}")
 
-filename = str(run.run_dir / f"ecg_reconstruction_{params_str}_test_plot_snippets.png"
+filename = str(run.run_dir / f"ecg_reconstruction_{params_str}_test_plot_snippets.png")
 
 # ---------------------------------------------------------------------
 # 2) Relevante Dateien finden & Labels laden
