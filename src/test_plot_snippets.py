@@ -53,12 +53,8 @@ run = start_run(params, base_dir="runs", seed=42)
 
 print(f" Neuer Testlauf: {run.run_dir}")
 
-params_str = (
-    f"LD{chosen_latent_dim}_Emb{config.NUM_EMBEDDINGS}_"
-    f"Cost{config.COMMITMENT_COST}_LR{config.LEARNING_RATE:.0e}_"
-    f"Epochs{config.AE_EPOCHS}_Batch{config.AE_BATCH_SIZE}")
 
-filename = str(run.run_dir / f"ecg_reconstruction_{params_str}_test_plot_snippets.png")
+filename = str(run.run_dir / f"_test_plot_snippets.png")
 
 # ---------------------------------------------------------------------
 # 2) Relevante Dateien finden & Labels laden
