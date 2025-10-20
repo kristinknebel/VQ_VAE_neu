@@ -52,6 +52,8 @@ params = {
 run = start_run(params, base_dir="runs", seed=42)
 print(f" Neuer Trainingslauf: {run.run_dir}")
 
+filename = str(run.run_dir / f"ecg_reconstruction_{params_str}_test_plot_snippets.png"
+
 # ---------------------------------------------------------------------
 # 2) Relevante Dateien finden & Labels laden
 # ---------------------------------------------------------------------
@@ -130,6 +132,7 @@ for i, idx in enumerate(example_indices):
 
 plt.suptitle("Beispiele: Originale EKG-Snippets", fontsize=14)
 plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.savefig(test_)
+plt.savefig(filename)
 plt.close()
+
 
