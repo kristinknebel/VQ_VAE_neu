@@ -31,6 +31,11 @@ from .visualization import (
     analyze_codebook_usage,
 )
 
+from pathlib import Path
+from src.snippet_cache import (
+    make_cache_key, get_cache_paths, try_load_or_build, compute_data_version
+)
+
 # ---------------------------------------------------------------------
 # 1) Run-Parameter erfassen & Run starten
 # ---------------------------------------------------------------------
@@ -66,44 +71,81 @@ ecg_id_to_scp_list = {ecg_id: get_scp_code_list(s)
                       for ecg_id, s in ecg_id_to_scp_str.items()}
 
 # ---------------------------------------------------------------------
-# 3) Snippets extrahieren (Teilmenge für Testläufe)
+# 3) Snippets laden (aus Cache) oder einmalig erstellen
 # ---------------------------------------------------------------------
-all_snippets = []
-all_ecg_ids = []
-all_scp_labels_raw = []
+MAX_FILES = 1000  # deine Teilmenge für schnelle Testläufe
 
-MAX_FILES = 1000  # kleine Begrenzung für schnellere Test-Runs
-print(f" Extrahiere Snippets aus bis zu {MAX_FILES} Dateien…")
-for filepath in filepath_list[:MAX_FILES]:
-    snippets, ecg_ids, scp_labels = create_snippets(
-        filepath, ecg_id_to_scp_list,
-        config.SAMPLING_RATE,
-        config.SNIPPET_LENGTH_BEFORE_R,
-        config.SNIPPET_LENGTH_AFTER_R,
+# Alle Parameter, die die Snippet-Erzeugung beeinflussen, in den Key
+cache_params = {
+    "sampling_rate":        config.SAMPLING_RATE,
+    "before_r":             config.SNIPPET_LENGTH_BEFORE_R,
+    "after_r":              config.SNIPPET_LENGTH_AFTER_R,
+    "max_files":            MAX_FILES,
+    # nur eintragen, falls Preprocessing davon abhängt:
+    # "leads": "all",
+    # "normalization": "per_snippet_zscore",
+}
+
+# Daten-Version (ändert sich, wenn Eingabedaten sich ändern)
+data_version = compute_data_version(
+    Path(config.RELEVANT_ECG_PATH),
+    Path(config.DATABASE_PATH) if getattr(config, "DATABASE_PATH", None) else None,
+)
+
+# Cache-Key & -Ort
+key = make_cache_key(cache_params, data_version=data_version)
+cache_root = Path("cache") / "snippets"
+
+# Build-Funktion kapselt deinen bisherigen Extraktions-Loop
+def _build_snippets():
+    all_snippets, all_ecg_ids, all_scp_labels_raw = [], [], []
+    for filepath in filepath_list[:MAX_FILES]:
+        snippets, ecg_ids, scp_labels = create_snippets(
+            filepath, ecg_id_to_scp_list,
+            config.SAMPLING_RATE,
+            config.SNIPPET_LENGTH_BEFORE_R,
+            config.SNIPPET_LENGTH_AFTER_R,
+        )
+        if snippets is not None and len(snippets) > 0:
+            all_snippets.extend(snippets)
+            all_ecg_ids.extend(ecg_ids)
+            all_scp_labels_raw.extend(scp_labels)
+
+    return (
+        np.asarray(all_snippets, dtype=np.float32),
+        np.asarray(all_ecg_ids),
+        np.asarray(all_scp_labels_raw),
     )
-    if snippets is not None and len(snippets) > 0:
-        all_snippets.extend(snippets)
-        all_ecg_ids.extend(ecg_ids)
-        all_scp_labels_raw.extend(scp_labels)
 
-if not all_snippets:
-    print("Keine Snippets gefunden. Prüfe Pfade/Preprocessing.")
-    sys.exit(0)
+# Laden oder bauen
+snippets, ecg_ids, labels, meta_dict, npz_path = try_load_or_build(
+    cache_root=cache_root,
+    key=key,
+    build_fn=_build_snippets,
+    meta={
+        "params": cache_params,
+        "data_version": data_version,
+        "relevant_path": str(config.RELEVANT_ECG_PATH),
+        "database_path": str(config.DATABASE_PATH),
+    },
+    verbose=True,
+)
 
-all_snippets = np.array(all_snippets)
-all_ecg_ids = np.array(all_ecg_ids)
-all_scp_labels_raw = np.array(all_scp_labels_raw)
+# Ab hier weiter wie gehabt
+all_snippets = snippets
+all_ecg_ids = ecg_ids
+all_scp_labels_raw = labels
+print(f"Snippets geladen: {all_snippets.shape}  (Quelle: {npz_path.name})")
 
 snippet_length, num_channels = all_snippets.shape[1], all_snippets.shape[2]
 print(f"Snippets: {all_snippets.shape} (Länge={snippet_length}, Kanäle={num_channels})")
 print(f"Anzahl Labels (roh): {len(all_scp_labels_raw)}")
 
-# Für Visualisierung: nur Single-Label-Snippets (dein Kriterium)
-single_label_indices = [i for i, label in enumerate(all_scp_labels_raw) if label.count('-') == 0]
+# Für Visualisierung: nur Single-Label-Snippets
+single_label_indices = [i for i, lab in enumerate(all_scp_labels_raw) if lab.count('-') == 0]
 single_label_snippets = all_snippets[single_label_indices]
 single_label_labels = all_scp_labels_raw[single_label_indices]
-print(f"   Single-Label-Snippets für Visualisierung: {len(single_label_labels)}")
-
+print(f"Single-Label-Snippets für Visualisierung: {len(single_label_labels)}")
 
 # ---------------------------------------------------------------------
 # 3,5) Test, wie Snippets aussehen
