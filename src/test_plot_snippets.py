@@ -56,7 +56,7 @@ print(f" Neuer Testlauf: {run.run_dir}")
 params_str = (
     f"LD{chosen_latent_dim}_Emb{config.NUM_EMBEDDINGS}_"
     f"Cost{config.COMMITMENT_COST}_LR{config.LEARNING_RATE:.0e}_"
-    f"Epochs{config.AE_EPOCHS}_Batch{config.AE_BATCH_SIZE}"
+    f"Epochs{config.AE_EPOCHS}_Batch{config.AE_BATCH_SIZE}")
 
 filename = str(run.run_dir / f"ecg_reconstruction_{params_str}_test_plot_snippets.png")
 
