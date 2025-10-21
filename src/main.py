@@ -73,7 +73,7 @@ ecg_id_to_scp_list = {ecg_id: get_scp_code_list(s)
 # ---------------------------------------------------------------------
 # 3) Snippets laden (aus Cache) oder einmalig erstellen
 # ---------------------------------------------------------------------
-MAX_FILES = 1000  # deine Teilmenge für schnelle Testläufe
+MAX_FILES = 1000  # Teilmenge für schnelle Testläufe
 
 # Alle Parameter, die die Snippet-Erzeugung beeinflussen, in den Key
 cache_params = {
