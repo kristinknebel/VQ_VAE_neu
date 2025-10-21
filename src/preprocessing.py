@@ -10,74 +10,104 @@ from .data_loader import get_scp_code_list
 #ecg_id_to_scp_list aus data_loader
 
 # ---- Funktion zum Erstellen von Snippets aus der EKG-Datei ----
-def create_snippets(filepath, ecg_id_to_scp_list, SAMPLING_RATE, SNIPPET_LENGTH_BEFORE_R, SNIPPET_LENGTH_AFTER_R):
+def create_snippets(filepath, ecg_id_to_scp_list,
+                    SAMPLING_RATE, SNIPPET_LENGTH_BEFORE_R, SNIPPET_LENGTH_AFTER_R):
+    """
+    Liefert:
+      - np.ndarray: (n_snippets, T, n_channels) [float32]
+      - np.ndarray: (n_snippets,)               ecg_id (str)
+      - np.ndarray: (n_snippets,)               scp_label (str)
+    """
     file = filepath[:-4]  # Entferne .dat
-    base_ecg_id = os.path.basename(filepath).split('.')[0] 
+    base_ecg_id = os.path.basename(filepath).split('.')[0]
 
+    # Labels bestimmen
     try:
         base_ecg_id_int = int(base_ecg_id.split('_')[0])
         scp_codes = ecg_id_to_scp_list.get(base_ecg_id_int)
-        #print(scp_codes)
     except ValueError as e:
         print(f"Fehler beim Konvertieren der ECG-ID '{base_ecg_id}' in Integer: {e}")
         return None, None, None
 
-    if scp_codes is None or not scp_codes:
-        #print(f"Warnung: Keine SCP-Codes gefunden für ECG-ID {base_ecg_id}")
+    if not scp_codes:
         return None, None, None
 
-    # Erstelle ein eindeutiges Label aus der Liste der SCP-Codes 
-    scp_label = "-".join(sorted(scp_codes)) # Konvertiere die sortierten Codes in einen String
+    scp_label = "-".join(sorted(scp_codes))
 
+    # Datensatz lesen
     try:
         record = wfdb.rdrecord(file)
-        full_ecg = record.p_signal
-        num_channels = full_ecg.shape[1]
-        r_peaks_all_channels = []
+        full_ecg = record.p_signal  # shape (N, n_channels), float
+        n_samples, n_channels = full_ecg.shape
 
-        for i in range(num_channels):
-            ecg_channel = full_ecg[:, i]
-            ecg_cleaned = nk.ecg_clean(ecg_channel, sampling_rate=SAMPLING_RATE)
-            try:
-                _, info = nk.ecg_process(ecg_cleaned, sampling_rate=SAMPLING_RATE)
-                r_peaks = info["ECG_R_Peaks"]
-            except Exception as e_nk:
-                print(f"Fehler bei nk.ecg_process für Kanal {i} in {filepath}: {e_nk}")
-                r_peaks = np.array([])
+        # Referenzableitung für R-Peak-Detektion finden (bevorzugt "II")
+        ref_idx = 0
+        try:
+            sig_names = getattr(record, "sig_name", None)
+            if sig_names and "II" in sig_names:
+                ref_idx = sig_names.index("II")
+            elif n_channels > 1:
+                ref_idx = 1  # PTB-XL: oft ist Kanal 1 (Index 1) Lead II in *_lr
+        except Exception:
+            ref_idx = min(1, n_channels - 1)
 
-            r_peaks_all_channels.append(r_peaks)
+        # Clean + R-Peaks auf Referenzableitung (einmalig, nicht pro Kanal)
+        ecg_cleaned = nk.ecg_clean(full_ecg[:, ref_idx], sampling_rate=SAMPLING_RATE)
+        try:
+            _, info = nk.ecg_process(ecg_cleaned, sampling_rate=SAMPLING_RATE)
+            r_peaks = np.asarray(info.get("ECG_R_Peaks", []), dtype=int)
+        except Exception as e_nk:
+            print(f"Fehler bei nk.ecg_process in {filepath}: {e_nk}")
+            r_peaks = np.array([], dtype=int)
 
-        ecg_snippets_with_labels = []
-        min_snippet_length = SNIPPET_LENGTH_BEFORE_R + SNIPPET_LENGTH_AFTER_R
-        for r_peaks_channel in r_peaks_all_channels:
-            r_peaks_channel = np.nan_to_num(r_peaks_channel).astype(int)
-            start_list = r_peaks_channel - SNIPPET_LENGTH_BEFORE_R
-            stop_list = r_peaks_channel + SNIPPET_LENGTH_AFTER_R
-            for start, stop in zip(start_list, stop_list):
-                if 0 <= start < len(full_ecg) and stop <= len(full_ecg) and len(full_ecg[start:stop]) == min_snippet_length:
-                    snippet = full_ecg[start:stop, :]
-                    # Normalisierung der Snippets
-                    max_abs_val = np.max(np.abs(snippet))
-                    if max_abs_val > 0:
-                        normalized_snippet = snippet / max_abs_val
-                    else:
-                        normalized_snippet = snippet  # Vermeide Division durch Null
-
-                    ecg_snippets_with_labels.append({'snippet': normalized_snippet, 'ecg_id': base_ecg_id, 'scp_label': scp_label})
-
-
-        num_snippets = len(ecg_snippets_with_labels)
-        if num_snippets < 5:
-            print(f"Zu wenige valide Snippets ({num_snippets}) in Datei: {filepath}")
+        if r_peaks.size == 0:
             return None, None, None
-        else:
-            print(f"Erfolgreich {num_snippets} valide Snippets aus Datei: {filepath} extrahiert (SCP-Label: {scp_label}).")
 
-        ecg_snippets = [item['snippet'] for item in ecg_snippets_with_labels]
-        ecg_ids = [item['ecg_id'] for item in ecg_snippets_with_labels]
-        scp_labels = [item['scp_label'] for item in ecg_snippets_with_labels]
+        # Snippets schneiden
+        min_len = SNIPPET_LENGTH_BEFORE_R + SNIPPET_LENGTH_AFTER_R
+        snippets = []
+        ecg_ids = []
+        labels = []
 
-        return np.array(ecg_snippets), np.array(ecg_ids), np.array(scp_labels)
+        for r in r_peaks:
+            start = r - SNIPPET_LENGTH_BEFORE_R
+            stop = r + SNIPPET_LENGTH_AFTER_R
+            if start < 0 or stop > n_samples:
+                continue
+            if (stop - start) != min_len:
+                continue
+
+            snippet = full_ecg[start:stop, :].astype(np.float32, copy=False)
+
+            # Baseline entfernen (pro Kanal)
+            snippet = snippet - np.mean(snippet, axis=0, keepdims=True)
+
+            # z-Score Normierung (pro Snippet; über alle Kanäle gemeinsam stabilisieren)
+            # Wenn du lieber pro Kanal normierst, benutze axis=0 bei std:
+            std = np.std(snippet)
+            if std > 0:
+                snippet = snippet / std
+
+            # Optional: Clip gegen Ausreißer
+            snippet = np.clip(snippet, -5.0, 5.0)
+
+            snippets.append(snippet)
+            ecg_ids.append(base_ecg_id)
+            labels.append(scp_label)
+
+        n_snippets = len(snippets)
+        if n_snippets < MIN_SNIPPETS_PER_FILE:
+            # konsistent mit deinem bisherigen Verhalten
+            print(f"Zu wenige valide Snippets ({n_snippets}) in Datei: {filepath}")
+            return None, None, None
+
+        print(f"Erfolgreich {n_snippets} valide Snippets aus Datei: {filepath} extrahiert (SCP-Label: {scp_label}).")
+
+        return (
+            np.asarray(snippets, dtype=np.float32),
+            np.asarray(ecg_ids),
+            np.asarray(labels)
+        )
 
     except Exception as e_main:
         print(f"Hauptfehler beim Verarbeiten der Datei {filepath}: {e_main}")
