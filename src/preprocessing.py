@@ -89,7 +89,7 @@ def create_snippets(filepath, ecg_id_to_scp_list,
                 snippet = snippet / std
 
             # Optional: Clip gegen Ausreißer
-            snippet = np.clip(snippet, -5.0, 5.0)
+            snippet = np.clip(snippet, -8.0, 8.0)
 
             snippets.append(snippet)
             ecg_ids.append(base_ecg_id)
