@@ -2,6 +2,7 @@
 
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import plotly.io as pio
 from sklearn.manifold import TSNE
 import umap
 import numpy as np
@@ -127,8 +128,9 @@ def visualize_latent_space(vq_vae_model, data, labels, n_components=3, method='T
         margin=dict(l=0, r=0, b=0, t=40)
     )
     fig.update_layout(layout)
-    fig.write_html(filename) 
-    fig.show()
+    pio.write_html(fig, file=filename, include_plotlyjs="cdn", auto_open=False)
+    print(f"Latent-Space-Visualisierung gespeichert unter: {filename}")
+
 
 # ---- Funktion zur Visualisierung der EKG-Rekonstruktionen ----
 # Diese Funktion bleibt gleich, da sie nur Original und Rekonstruktion plottet
