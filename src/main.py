@@ -172,7 +172,8 @@ for i, idx in enumerate(example_indices):
 
 plt.suptitle("Beispiele: Originale EKG-Snippets", fontsize=14)
 plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.show()
+plt.savefig(run.run_dir / "test_snippets.png")
+plt.close()
 
 # ---------------------------------------------------------------------
 # 4) Train/Test-Split (stratifiziert nach Label)
