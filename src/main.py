@@ -150,30 +150,70 @@ print(f"Single-Label-Snippets für Visualisierung: {len(single_label_labels)}")
 # ---------------------------------------------------------------------
 # 3,5) Test, wie Snippets aussehen
 # ---------------------------------------------------------------------
-print("\nBeispielhafte Original-Snippets (ungefiltert):")
+def snippet_stats(snippet):
+    """Stats über Zeit; bei 2D erst pro Kanal, dann Mittelwert über Kanäle."""
+    import numpy as np
+    if snippet.ndim == 1:
+        x = snippet
+        mean = float(np.mean(x))
+        std = float(np.std(x))
+        vmin = float(np.min(x))
+        vmax = float(np.max(x))
+    else:
+        m = np.mean(snippet, axis=0)
+        s = np.std(snippet, axis=0)
+        mean = float(np.mean(m))
+        std = float(np.mean(s))
+        vmin = float(np.min(snippet))
+        vmax = float(np.max(snippet))
+    return mean, std, vmin, vmax
 
-num_examples = 10
+
+
+print("\nBeispielhafte Original-Snippets (mit Stats-Overlay):")
+
+num_examples = min(10, len(all_snippets))
+# reproduzierbare Auswahl (wie im Testskript – du kannst auch rng = np.random.default_rng(42) nehmen)
 example_indices = np.random.choice(len(all_snippets), size=num_examples, replace=False)
 
-plt.figure(figsize=(12, 8))
+# gleicher Dateiname im Run-Ordner
+snip_plot_file = run.run_dir / "test_plot_snippets.png"
+
+plt.figure(figsize=(12, 2.2 * num_examples))
+per_snippet_means = []
+per_snippet_stds = []
+
 for i, idx in enumerate(example_indices):
     snippet = all_snippets[idx]
+    plt.subplot(num_examples, 1, i + 1)
 
-    # Falls das Snippet mehrkanalig ist (z. B. 12 Kanäle)
-    if snippet.ndim == 2:
-        plt.subplot(num_examples, 1, i + 1)
-        # z.B. Kanal I anzeigen (index 0)
+    # Variante A: nur Lead 0 (wie im Testskript)
+    if snippet.ndim == 2 and snippet.shape[1] > 0:
         plt.plot(snippet[:, 0], label=f"ECG_ID={all_ecg_ids[idx]}, Label={all_scp_labels_raw[idx]}")
-        plt.legend(loc="upper right", fontsize="small")
     else:
-        plt.subplot(num_examples, 1, i + 1)
         plt.plot(snippet, label=f"ECG_ID={all_ecg_ids[idx]}, Label={all_scp_labels_raw[idx]}")
-        plt.legend(loc="upper right", fontsize="small")
 
-plt.suptitle("Beispiele: Originale EKG-Snippets", fontsize=14)
-plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.savefig(run.run_dir / "test_snippets.png")
+    # Stats berechnen und als Overlay anzeigen (wie im Testskript)
+    mean, std, vmin, vmax = snippet_stats(snippet)
+    per_snippet_means.append(mean)
+    per_snippet_stds.append(std)
+
+    ax = plt.gca()
+    x0, x1 = ax.get_xlim(); y0, y1 = ax.get_ylim()
+    txt = f"mean={mean:.3f}, std={std:.3f}, min={vmin:.3f}, max={vmax:.3f}"
+    ax.text(
+        x=x0 + 0.99*(x1 - x0),
+        y=y0 + 0.95*(y1 - y0),
+        s=txt, ha="right", va="top", fontsize=8,
+        bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=2)
+    )
+    plt.legend(loc="upper left", fontsize="x-small")
+
+plt.suptitle("Beispiele: Originale EKG-Snippets (Lead 0) mit Stats", fontsize=14)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.savefig(snip_plot_file, dpi=150)
 plt.close()
+print(f"Plot gespeichert: {snip_plot_file}")
 
 # ---------------------------------------------------------------------
 # 4) Train/Test-Split (stratifiziert nach Label)
