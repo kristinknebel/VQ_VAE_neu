@@ -237,7 +237,8 @@ class VQVAE(Model):
 
 
 # Die Funktion zum Trainieren und Evaluieren des VQ-VAE
-def train_and_evaluate_vqvae(train_data, test_data, input_shape, latent_dim, num_embeddings, commitment_cost, epochs=10, batch_size=32):
+def train_and_evaluate_vqvae(train_data, test_data, input_shape, latent_dim, num_embeddings, commitment_cost, epochs=10, batch_size=32,learning_rate=1e-4):
+    # Defaults angegeben, damit es beim Debugging nicht zu Problemen kommt. Defaults werden im main überschrieben
     # Instanziieren des VQ-VAE Modells
     vq_vae = VQVAE(input_shape, latent_dim, num_embeddings, commitment_cost)
     
@@ -256,10 +257,15 @@ def train_and_evaluate_vqvae(train_data, test_data, input_shape, latent_dim, num
 
 
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     vq_vae.compile(optimizer=optimizer, loss = 'mse') # Keras will automatically pick up losses added via add_loss() , mse=mean sqaured error
     
-    print(f"Starte Training für VQ-VAE mit Latenz-Dimension: {latent_dim}, Codebook-Größe: {num_embeddings}")
+    print(f"\nStarte Training:")
+    print(f"  Latent Dim: {latent_dim}")
+    print(f"  Codebook Size: {num_embeddings}")
+    print(f"  β (Commitment Cost): {commitment_cost}")
+    print(f"  Learning Rate: {learning_rate}")
+    print(f"  Epochs: {epochs}, Batch Size: {batch_size}")
     
     # Der `fit` Aufruf bleibt ähnlich, da Keras die Losses intern verwaltet.
     history = vq_vae.fit(train_data, train_data, 
