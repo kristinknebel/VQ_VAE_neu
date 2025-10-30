@@ -1,3 +1,4 @@
+#!/bin/bash
 #SBATCH --job-name=vqvae_exp
 #SBATCH --output=logs/vqvae_%A_%a.out
 #SBATCH --error=logs/vqvae_%A_%a.err
