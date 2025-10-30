@@ -315,6 +315,8 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
             filename=str(run.run_dir / f"VQ-VAE_3d_latent_space_quantized_TSNE_{params_str}.html"),
             params_info=params_str,
         )
+    else:
+    print("Keine Single-Label-Snippets für die Latentraum-Visualisierung vorhanden.")
 
     # --- (c) Codebook Embeddings ---
     print("  → Visualisiere Codebook-Embeddings…")
