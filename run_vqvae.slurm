@@ -9,8 +9,7 @@
 #SBATCH --partition=short 
 
 # === Umgebung vorbereiten ===
-module load anaconda/3
-source activate tf_env                # Conda-Environment aktivieren
+conda activate tf_env                # Conda-Environment aktivieren
 
 # === Ins Projektverzeichnis wechseln ===
 cd ~/masterarbeit/VQ_VAE_neu
