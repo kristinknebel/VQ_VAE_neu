@@ -254,8 +254,16 @@ experiments = list(product(
 ))
 print(f"Gesamtanzahl Experimente: {len(experiments)}")
 
-results_summary = []
+# === Range-Filter (für parallele Ausführung) ===
+if len(sys.argv) == 3 and sys.argv[1] == "--range":
+    start_idx, end_idx = map(int, sys.argv[2].split("-"))
+    experiments_subset = experiments[start_idx:end_idx+1]
+    print(f"Führe Experimente {start_idx}-{end_idx} aus ({len(experiments_subset)} Stück).")
+else:
+    experiments_subset = experiments
+    print(f"Führe alle {len(experiments_subset)} Experimente aus.")
 
+results_summary = []
 # ---------------------------------------------------------------------
 # Trainingsschleife
 # ---------------------------------------------------------------------
