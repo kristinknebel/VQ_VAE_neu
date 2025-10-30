@@ -6,7 +6,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
-#SBATCH --partition=all
+#SBATCH --partition=short 
 
 # === Umgebung vorbereiten ===
 module load anaconda/3
