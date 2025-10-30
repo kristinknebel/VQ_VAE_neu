@@ -230,8 +230,10 @@ input_shape = (train_snippets.shape[1], train_snippets.shape[2])
 print(f"Split: train={train_snippets.shape[0]} / test={test_snippets.shape[0]}")
 
 # ---------------------------------------------------------------------
-# 5) Automatisierte Hyperparameter-Experimente
+# 5) Automatisierte Hyperparameter-Experimente (wie bisher, aber mehrere)
 # ---------------------------------------------------------------------
+from itertools import product
+import datetime
 
 # === Suchraster definieren ===
 LEARNING_RATES = [1e-4, 5e-4]
@@ -252,21 +254,12 @@ experiments = list(product(
 ))
 print(f"Gesamtanzahl Experimente: {len(experiments)}")
 
-# === Range-Filter (für parallele Ausführung) ===
-if len(sys.argv) == 3 and sys.argv[1] == "--range":
-    start_idx, end_idx = map(int, sys.argv[2].split("-"))
-    experiments_subset = experiments[start_idx:end_idx+1]
-    print(f"Führe Experimente {start_idx}-{end_idx} aus ({len(experiments_subset)} Stück).")
-else:
-    experiments_subset = experiments
-    print(f"Führe alle {len(experiments_subset)} Experimente aus.")
-
 results_summary = []
 
 # ---------------------------------------------------------------------
 # Trainingsschleife
 # ---------------------------------------------------------------------
-for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments_subset:
+for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
     exp_name = (
         f"LD{latent_dim}_Emb{num_emb}_Cost{beta}_LR{lr:.0e}_"
         f"Epochs{epochs}_Batch{batch_size}"
@@ -290,7 +283,7 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments_subset:
     run = start_run(params, base_dir="runs", seed=42)
     print(f"  → Run-Ordner: {run.run_dir}")
 
-    # Trainieren
+    # --- Training ---
     vq_vae_model, history, total_loss = train_and_evaluate_vqvae(
         train_snippets, test_snippets, input_shape, latent_dim,
         num_emb, beta, epochs, batch_size, learning_rate=lr
@@ -301,36 +294,55 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments_subset:
         f"Epochs{epochs}_Batch{batch_size}"
     )
 
-    # (a) Rekonstruktionen speichern
-    print("  → Speichere Rekonstruktionen...")
+    # --- (a) Rekonstruktionen ---
+    print("  → Speichere Rekonstruktionen…")
     reconstructed_test_snippets = vq_vae_model.predict(test_snippets, verbose=0)
     plot_ecg_reconstructions(
         test_snippets, reconstructed_test_snippets, num_examples=5,
         filename=str(run.run_dir / f"ecg_reconstruction_{params_str}.png")
     )
 
-    # (b) Codebook-Analyse
-    print("  → Analysiere Codebook-Nutzung...")
-    stats = analyze_codebook_usage(
-        vq_vae_model, (x for x in [test_snippets]), max_batches=1, plot=False
+    # --- (b) Latent-Space ---
+    if len(single_label_labels) > 0:
+        print("  → Visualisiere quantisierten Latent-Raum…")
+        visualize_latent_space(
+            vq_vae_model,
+            single_label_snippets,
+            single_label_labels,
+            n_components=getattr(config, "VIS_N_COMPONENTS", 3),
+            method=getattr(config, "VIS_METHOD", "TSNE"),
+            filename=str(run.run_dir / f"VQ-VAE_3d_latent_space_quantized_TSNE_{params_str}.html"),
+            params_info=params_str,
+        )
+
+    # --- (c) Codebook Embeddings ---
+    print("  → Visualisiere Codebook-Embeddings…")
+    visualize_codebook_embeddings(
+        vq_vae_model.vq_layer,
+        n_components=getattr(config, "VIS_N_COMPONENTS", 3),
+        method=getattr(config, "VIS_METHOD", "TSNE"),
+        filename=str(run.run_dir / f"codebooks_embeddings_TSNE_{params_str}.html"),
+        params_info=params_str,
     )
+
+    # --- (d) Codebook-Nutzung ---
+    print("  → Analysiere Codebook-Nutzung…")
+    stats = analyze_codebook_usage(vq_vae_model, (x for x in [test_snippets]), max_batches=1, plot=False)
     with open(run.run_dir / "codebook_usage.json", "w") as f:
         json.dump({k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in stats.items()}, f, indent=2)
     plt.figure(figsize=(10, 4))
     plt.bar(stats["unique_indices"], stats["counts"], color="steelblue")
     plt.title(f"Codebook-Nutzung: {len(stats['unique_indices'])}/{stats['num_embeddings']}")
-    plt.xlabel("Index")
-    plt.ylabel("Häufigkeit")
-    plt.tight_layout()
+    plt.xlabel("Index"); plt.ylabel("Häufigkeit"); plt.tight_layout()
     plt.savefig(run.run_dir / "codebook_usage.png", dpi=150)
     plt.close()
 
-    # (c) Trainingsverlauf speichern
+    # --- (e) Trainingsverlauf speichern ---
     if hasattr(history, "history"):
         with open(run.run_dir / "history.json", "w") as f:
             json.dump(history.history, f, indent=2)
 
-    # (d) Ergebnis für Zusammenfassung
+    # --- (f) Zusammenfassung ergänzen ---
     results_summary.append({
         "run_dir": str(run.run_dir),
         "latent_dim": latent_dim,
@@ -344,13 +356,12 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments_subset:
     })
 
 # ---------------------------------------------------------------------
-# 6) Zusammenfassung aller Experimente speichern
+# 6) Zusammenfassung speichern
 # ---------------------------------------------------------------------
 summary_path = Path("runs") / f"summary_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 with open(summary_path, "w") as f:
     json.dump(results_summary, f, indent=2)
 
-print(f"\nAlle {len(experiments_subset)} Experimente abgeschlossen.")
+print(f"\nAlle {len(experiments)} Experimente abgeschlossen.")
 print(f"→ Zusammenfassung gespeichert unter: {summary_path}")
-
 print("Code ist erfolgreich durchgelaufen.")
