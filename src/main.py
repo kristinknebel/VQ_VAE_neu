@@ -316,7 +316,7 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
             params_info=params_str,
         )
     else:
-    print("Keine Single-Label-Snippets für die Latentraum-Visualisierung vorhanden.")
+        print("Keine Single-Label-Snippets für die Latentraum-Visualisierung vorhanden.")
 
     # --- (c) Codebook Embeddings ---
     print("  → Visualisiere Codebook-Embeddings…")
