@@ -303,6 +303,7 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
     )
 
     # --- (b) Latent-Space ---
+    print(f"  → Single-Label-Snippets verfügbar: {len(single_label_labels)}")
     if len(single_label_labels) > 0:
         print("  → Visualisiere quantisierten Latent-Raum…")
         visualize_latent_space(
