@@ -10,7 +10,7 @@ import os
 import json
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")  # wichtig auf Servern ohne Display
+matplotlib.use("Agg")  # wichtig auf Servern ohne Display -> plt.show() wird ignoriert
 import matplotlib.pyplot as plt
 
 from . import config
