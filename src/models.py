@@ -3,7 +3,7 @@ from tensorflow.keras import layers, Model
 import numpy as np # Wird für tf.Variable Initialisierung benötigt
 
 from .config import LEARNING_RATE
-# HypersphereNormalization bleibt unverändert, da sie für den Encoder-Output vor der Quantisierung nützlich sein könnte
+# Hypersphere wird aktuell nicht genutzt
 class HypersphereNormalization(layers.Layer):
     def __init__(self, **kwargs):
         super(HypersphereNormalization, self).__init__(**kwargs)
