@@ -80,13 +80,11 @@ def create_snippets(filepath, ecg_id_to_scp_list,
             snippet = full_ecg[start:stop, :].astype(np.float32, copy=False)
 
             # Baseline entfernen (pro Kanal)
-            snippet = snippet - np.mean(snippet, axis=0, keepdims=True)
+            mean = np.mean(snippet, axis=0, keepdims=True)
+            std  = np.std(snippet, axis=0, keepdims=True)  # z-Score Normierung (jetzt pro Kanal)
+            
+            snippet = (snippet - mean) / (std + 1e-8)
 
-            # z-Score Normierung (pro Snippet; über alle Kanäle gemeinsam stabilisieren)
-            # Wenn du lieber pro Kanal normierst, benutze axis=0 bei std:
-            std = np.std(snippet)
-            if std > 0:
-                snippet = snippet / std
 
             # Optional: Clip gegen Ausreißer
             snippet = np.clip(snippet, -8.0, 8.0)
