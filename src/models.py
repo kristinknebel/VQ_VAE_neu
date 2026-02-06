@@ -114,8 +114,10 @@ class VQVAE(Model):
             layers.MaxPooling1D(pool_size=2, padding="same"),
             layers.Conv1D(filters=32, kernel_size=4, activation="relu", padding="same"),
             layers.MaxPooling1D(pool_size=2, padding="same"),
-            layers.Conv1D(filters=latent_dim, kernel_size=3, activation="relu", padding="same", name="encoder_output_pre_vq"),
+            layers.Conv1D(filters=latent_dim, kernel_size=3, activation=None, padding="same", name="encoder_output_pre_vq"),
+            layers.BatchNormalization(),
        ], name='encoder')
+            
 
         # VQ Layer
         self.vq_layer = VectorQuantizer(num_embeddings, latent_dim, commitment_cost, name="vector_quantizer")
@@ -128,7 +130,7 @@ class VQVAE(Model):
             
             layers.Conv1DTranspose(filters=64, kernel_size=4, strides=2, activation="relu", padding="same"),
          
-            layers.Conv1D(filters=input_shape[-1], kernel_size=8, activation="sigmoid", padding="same")
+            layers.Conv1D(filters=input_shape[-1], kernel_size=8, activation=None, padding="same")
 
         ], name='decoder')
 
@@ -139,7 +141,7 @@ class VQVAE(Model):
         
         # Add the reconstruction loss
         reconstruction_loss = tf.reduce_mean((x - reconstructions)**2, name="reconstruction_loss")
-        self.add_loss(reconstruction_loss)
+        #self.add_loss(reconstruction_loss)
         
         return reconstructions
 
