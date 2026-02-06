@@ -39,6 +39,8 @@ from itertools import product
 import json
 import datetime
 
+DO_PLOTS = False #extra Skript für Plots
+
 # ---------------------------------------------------------------------
 # 1) Run-Parameter erfassen & Run starten
 # ---------------------------------------------------------------------
@@ -222,10 +224,21 @@ print(f"Plot gespeichert: {snip_plot_file}")
 # 4) Train/Test-Split (stratifiziert nach Label)
 # ---------------------------------------------------------------------
 from sklearn.model_selection import train_test_split
-train_snippets, test_snippets, labels_train, labels_test = train_test_split(
-    all_snippets, all_scp_labels_raw,
+train_snippets, test_snippets, labels_train, labels_test, ecg_ids_train, ecg_ids_test = train_test_split(
+    all_snippets, all_scp_labels_raw, all_ecg_ids,
     test_size=0.2, random_state=42, stratify=all_scp_labels_raw
 )
+import hashlib
+
+def snippet_fingerprint(x: np.ndarray) -> str:
+    # float32 + bytes -> stabiler Hash
+    xb = np.asarray(x, dtype=np.float32).tobytes(order="C")
+    return hashlib.sha256(xb).hexdigest()[:16]
+
+# Fingerprints einmal berechnen (nach dem Split)
+test_fps = np.array([snippet_fingerprint(s) for s in test_snippets])
+
+
 input_shape = (train_snippets.shape[1], train_snippets.shape[2])
 print(f"Split: train={train_snippets.shape[0]} / test={test_snippets.shape[0]}")
 
@@ -291,11 +304,36 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
     run = start_run(params, base_dir="runs", seed=42)
     print(f"  → Run-Ordner: {run.run_dir}")
 
+    # Fingerprints in JEDEM Experiment-Run speichern (damit Plot-Skript nur run_dir braucht)
+    np.save(run.run_dir / "test_fingerprints.npy", test_fps)
+
+    
+    # Optional hilfreich: cache key / meta referenzieren
+    with open(run.run_dir / "cache_ref.json", "w") as f:
+        json.dump(
+          {"cache_key": key, "cache_root": str(cache_root),
+           "data_version": data_version, "cache_params": cache_params},
+          f, indent=2
+        )
+
     # --- Training ---
     vq_vae_model, history, total_loss = train_and_evaluate_vqvae(
         train_snippets, test_snippets, input_shape, latent_dim,
         num_emb, beta, epochs, batch_size, learning_rate=lr
     )
+    # --- Model speichern (wie MCG) ---
+    vq_vae_model.save_weights(run.run_dir / "vqvae_final.weights.h5")
+    # --- Codebook Embeddings speichern ---
+    np.save(run.run_dir / "codebook_embeddings.npy",
+            vq_vae_model.vq_layer.embeddings.numpy())
+    # --- (A3) Quantisierte Snippet-Embeddings speichern (wie MCG beat_embeddings) ---
+    quantized = vq_vae_model.get_latent_representation(test_snippets).numpy()  # (N, T', latent_dim)
+    quantized_mean = quantized.mean(axis=1)  # (N, latent_dim) -> pro Snippet aggregiert
+    
+    np.save(run.run_dir / "snippet_embeddings.npy", quantized_mean)
+    np.save(run.run_dir / "snippet_ecg_ids.npy", np.asarray(ecg_ids_test))
+    with open(run.run_dir / "snippet_labels.json", "w") as f:
+        json.dump([str(x) for x in labels_test], f, indent=2)
 
     params_str = (
         f"LD{latent_dim}_Emb{num_emb}_Cost{beta}_LR{lr:.0e}_"
@@ -303,50 +341,57 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
     )
 
     # --- (a) Rekonstruktionen ---
-    print("  → Speichere Rekonstruktionen…")
-    reconstructed_test_snippets = vq_vae_model.predict(test_snippets, verbose=0)
-    plot_ecg_reconstructions(
-        test_snippets, reconstructed_test_snippets, num_examples=5,
-        filename=str(run.run_dir / f"ecg_reconstruction_{params_str}.png")
-    )
+    
+    if DO_PLOTS:
+        print("  → Speichere Rekonstruktionen…")
+        reconstructed_test_snippets = vq_vae_model.predict(test_snippets, verbose=0)
+        plot_ecg_reconstructions(
+            test_snippets, reconstructed_test_snippets, num_examples=5,
+            filename=str(run.run_dir / f"ecg_reconstruction_{params_str}.png")
+        )
 
     # --- (b) Latent-Space ---
-    print(f"  → Single-Label-Snippets verfügbar: {len(single_label_labels)}")
-    if len(single_label_labels) > 0:
-        print("  → Visualisiere quantisierten Latent-Raum…")
-        visualize_latent_space(
-            vq_vae_model,
-            single_label_snippets,
-            single_label_labels,
-            n_components=getattr(config, "VIS_N_COMPONENTS", 3),
-            method=getattr(config, "VIS_METHOD", "TSNE"),
-            filename=str(run.run_dir / f"VQ-VAE_3d_latent_space_quantized_TSNE_{params_str}.html"),
-            params_info=params_str,
-        )
-    else:
-        print("Keine Single-Label-Snippets für die Latentraum-Visualisierung vorhanden.")
+    if DO_PLOTS:
+        print(f"  → Single-Label-Snippets verfügbar: {len(single_label_labels)}")
+        if len(single_label_labels) > 0:
+            print("  → Visualisiere quantisierten Latent-Raum…")
+            visualize_latent_space(
+                vq_vae_model,
+                single_label_snippets,
+                single_label_labels,
+                n_components=getattr(config, "VIS_N_COMPONENTS", 3),
+                method=getattr(config, "VIS_METHOD", "TSNE"),
+                filename=str(run.run_dir / f"VQ-VAE_3d_latent_space_quantized_TSNE_{params_str}.html"),
+                params_info=params_str,
+            )
+        else:
+            print("Keine Single-Label-Snippets für die Latentraum-Visualisierung vorhanden.")
 
     # --- (c) Codebook Embeddings ---
-    print("  → Visualisiere Codebook-Embeddings…")
-    visualize_codebook_embeddings(
-        vq_vae_model.vq_layer,
-        n_components=getattr(config, "VIS_N_COMPONENTS", 3),
-        method=getattr(config, "VIS_METHOD", "TSNE"),
-        filename=str(run.run_dir / f"codebooks_embeddings_TSNE_{params_str}.html"),
-        params_info=params_str,
-    )
+    if DO_PLOTS:
+        print("  → Visualisiere Codebook-Embeddings…")
+        visualize_codebook_embeddings(
+            vq_vae_model.vq_layer,
+            n_components=getattr(config, "VIS_N_COMPONENTS", 3),
+            method=getattr(config, "VIS_METHOD", "TSNE"),
+            filename=str(run.run_dir / f"codebooks_embeddings_TSNE_{params_str}.html"),
+            params_info=params_str,
+        )
 
     # --- (d) Codebook-Nutzung ---
     print("  → Analysiere Codebook-Nutzung…")
     stats = analyze_codebook_usage(vq_vae_model, (x for x in [test_snippets]), max_batches=1, plot=False)
+    np.save(run.run_dir / "codebook_used_indices.npy", np.asarray(stats["unique_indices"]))      # Codebook-Usage Rohdaten speichern (wie MCG)
+    np.save(run.run_dir / "codebook_counts.npy", np.asarray(stats["counts"]))
     with open(run.run_dir / "codebook_usage.json", "w") as f:
         json.dump({k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in stats.items()}, f, indent=2)
-    plt.figure(figsize=(10, 4))
-    plt.bar(stats["unique_indices"], stats["counts"], color="steelblue")
-    plt.title(f"Codebook-Nutzung: {len(stats['unique_indices'])}/{stats['num_embeddings']}")
-    plt.xlabel("Index"); plt.ylabel("Häufigkeit"); plt.tight_layout()
-    plt.savefig(run.run_dir / "codebook_usage.png", dpi=150)
-    plt.close()
+    if DO_PLOTS:
+        plt.figure(figsize=(10, 4))
+        plt.bar(stats["unique_indices"], stats["counts"], color="steelblue")
+        plt.title(f"Codebook-Nutzung: {len(stats['unique_indices'])}/{stats['num_embeddings']}")
+        plt.xlabel("Index"); plt.ylabel("Häufigkeit"); plt.tight_layout()
+        plt.savefig(run.run_dir / "codebook_usage.png", dpi=150)
+        plt.close()    
 
     # --- (e) Trainingsverlauf speichern ---
     if hasattr(history, "history"):
