@@ -86,7 +86,7 @@ cache_params = {
     "max_files":            MAX_FILES,
     # nur eintragen, falls Preprocessing davon abhängt:
     # "leads": "all",
-    # "normalization": "per_snippet_zscore",
+    "normalization": "zscore_per_channel",
 }
 
 # Daten-Version (ändert sich, wenn Eingabedaten sich ändern)
