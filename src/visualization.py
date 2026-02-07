@@ -292,7 +292,7 @@ def _get_codebook_matrix(vq_layer: tf.keras.layers.Layer) -> tf.Tensor:
             cand_vars.append(w)
     if cand_vars:
         # wähle die erste 2D-Matrix
-        return cand_vars[0].read_value()
+        return tf.convert_to_tensor(cand_vars[0])
     # Manche Implementationen halten das Codebook als Attribut
     for attr in ("embedding", "embeddings", "codebook", "codebook_embedding"):
         if hasattr(vq_layer, attr):
