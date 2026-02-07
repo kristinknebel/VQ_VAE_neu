@@ -70,7 +70,7 @@ class VectorQuantizer(layers.Layer):
         # `inputs` (z_e(x)) are differentiable
         # `quantized_latents` (e_i) are detached from the gradient flow
         embedding_loss = tf.reduce_mean(
-            (inputs - tf.stop_gradient(quantized_latents))**2
+            (tf.stop_gradient(inputs) - quantized_latents)**2
         )
 
         # Add losses to the model.
