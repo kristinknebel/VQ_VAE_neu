@@ -24,10 +24,11 @@ class VectorQuantizer(layers.Layer):
 
 
         initializer = tf.keras.initializers.GlorotUniform()
-        self.embeddings = tf.Variable(
-            initializer(shape=(self.num_embeddings, self.embedding_dim)),
+        self.embeddings = self.add_weight(
+            name="embeddings_codebook",
+            shape=(self.num_embeddings, self.embedding_dim),
+            initializer=initializer,
             trainable=True,
-            name="embeddings_codebook"
         )
 
     def call(self, inputs):
