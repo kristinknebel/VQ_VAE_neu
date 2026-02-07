@@ -31,7 +31,7 @@ echo "Python: $(which python)"
 echo "--------------------------------------"
 
 # Optional: sanity check, dass runs existiert
-ls -lah runs | head -n 50
+# ls -lah runs | head -n 50
 
 # === Plots erzeugen ===
 # Passe bei Bedarf Parameter an (n_recon/tsne_points/only_latest/Filter)
