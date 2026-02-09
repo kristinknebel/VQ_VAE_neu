@@ -20,7 +20,7 @@ with np.load(npz_path, allow_pickle=False) as d:
 print("Unique ecg_ids in cache:", len(np.unique(ecg_ids)))
 
 # --- PTB-XL DB laden (Pfad ggf. anpassen!) ---
-db = pd.read_csv("data/ptbxl_database.csv")
+db = pd.read_csv("data/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3/ptbxl_database.csv")
 
 # ecg_ids in deinem Code sind Strings wie "12345_lr" -> int vorne rausziehen
 def to_int(x):
