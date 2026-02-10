@@ -146,7 +146,7 @@ all_scp_labels_raw = labels
 # ---------------------------------------------------------------------
 # Patient-ID Mapping aus ptbxl_database.csv laden
 # ---------------------------------------------------------------------
-ptbxl_csv = Path(config.DATA_DIR) / "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3" / "ptbxl_database.csv"
+ptbxl_csv = Path(config.DATA_DIR) /  "ptbxl_database.csv"
 df_meta = pd.read_csv(ptbxl_csv)
 
 # PTB-XL: Spalten heißen typischerweise "ecg_id" und "patient_id"
