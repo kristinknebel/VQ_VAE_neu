@@ -38,6 +38,7 @@ from src.snippet_cache import (
 from itertools import product
 import json
 import datetime
+import pandas as pd
 
 DO_PLOTS = False #extra Skript für Plots
 
@@ -59,8 +60,8 @@ params = {
     "DATA_DIR": str(getattr(config, "DATA_DIR", "")),
 }
 
-run = start_run(params, base_dir="runs", seed=42)
-print(f" Neuer Trainingslauf: {run.run_dir}")
+#run = start_run(params, base_dir="runs", seed=42)
+#print(f" Neuer Trainingslauf: {run.run_dir}")
 
 # ---------------------------------------------------------------------
 # 2) Relevante Dateien finden & Labels laden
@@ -89,6 +90,7 @@ cache_params = {
     # nur eintragen, falls Preprocessing davon abhängt:
     # "leads": "all",
     "normalization": "zscore_per_channel",
+    "split_level": "patient_id",
 }
 
 # Daten-Version (ändert sich, wenn Eingabedaten sich ändern)
@@ -140,107 +142,104 @@ snippets, ecg_ids, labels, meta_dict, npz_path = try_load_or_build(
 all_snippets = snippets
 all_ecg_ids = ecg_ids
 all_scp_labels_raw = labels
+
+# ---------------------------------------------------------------------
+# Patient-ID Mapping aus ptbxl_database.csv laden
+# ---------------------------------------------------------------------
+ptbxl_csv = Path(config.DATA_DIR) / "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3" / "ptbxl_database.csv"
+df_meta = pd.read_csv(ptbxl_csv)
+
+# PTB-XL: Spalten heißen typischerweise "ecg_id" und "patient_id"
+ecg_to_patient = dict(zip(df_meta["ecg_id"].astype(int), df_meta["patient_id"].astype(int)))
+
+# Achtung: deine all_ecg_ids sind Strings wie "12345_lr" oder "12345"
+# -> wir extrahieren die führende Zahl
+def _to_ecg_int(ecg_id_str: str) -> int:
+    return int(str(ecg_id_str).split("_")[0])
+
+all_ecg_ids_int = np.array([_to_ecg_int(x) for x in all_ecg_ids], dtype=int)
+
+# patient_id pro Snippet bestimmen
+all_patient_ids = np.array([ecg_to_patient.get(eid, -1) for eid in all_ecg_ids_int], dtype=int)
+
+# Safety-Check: wie viele fehlen?
+n_missing = int(np.sum(all_patient_ids < 0))
+if n_missing > 0:
+    print(f"[WARN] {n_missing} Snippets haben keine patient_id (ecg_id nicht im CSV). Diese werden entfernt.")
+    keep = all_patient_ids >= 0
+    all_snippets = all_snippets[keep]
+    all_scp_labels_raw = np.asarray(all_scp_labels_raw)[keep]
+    all_ecg_ids = np.asarray(all_ecg_ids)[keep]
+    all_ecg_ids_int = all_ecg_ids_int[keep]
+    all_patient_ids = all_patient_ids[keep]
+
+
 print(f"Snippets geladen: {all_snippets.shape}  (Quelle: {npz_path.name})")
 
 snippet_length, num_channels = all_snippets.shape[1], all_snippets.shape[2]
 print(f"Snippets: {all_snippets.shape} (Länge={snippet_length}, Kanäle={num_channels})")
 print(f"Anzahl Labels (roh): {len(all_scp_labels_raw)}")
 
-# Für Visualisierung: nur Single-Label-Snippets
-single_label_indices = [i for i, lab in enumerate(all_scp_labels_raw) if lab.count('-') == 0]
-single_label_snippets = all_snippets[single_label_indices]
-single_label_labels = all_scp_labels_raw[single_label_indices]
-print(f"Single-Label-Snippets für Visualisierung: {len(single_label_labels)}")
+
 
 # ---------------------------------------------------------------------
-# 3,5) Test, wie Snippets aussehen
-# ---------------------------------------------------------------------
-def snippet_stats(snippet):
-    """Stats über Zeit; bei 2D erst pro Kanal, dann Mittelwert über Kanäle."""
-    import numpy as np
-    if snippet.ndim == 1:
-        x = snippet
-        mean = float(np.mean(x))
-        std = float(np.std(x))
-        vmin = float(np.min(x))
-        vmax = float(np.max(x))
-    else:
-        m = np.mean(snippet, axis=0)
-        s = np.std(snippet, axis=0)
-        mean = float(np.mean(m))
-        std = float(np.mean(s))
-        vmin = float(np.min(snippet))
-        vmax = float(np.max(snippet))
-    return mean, std, vmin, vmax
-
-
-
-print("\nBeispielhafte Original-Snippets (mit Stats-Overlay):")
-
-num_examples = min(10, len(all_snippets))
-# reproduzierbare Auswahl (wie im Testskript – du kannst auch rng = np.random.default_rng(42) nehmen)
-example_indices = np.random.choice(len(all_snippets), size=num_examples, replace=False)
-
-# gleicher Dateiname im Run-Ordner
-snip_plot_file = run.run_dir / "test_plot_snippets.png"
-
-plt.figure(figsize=(12, 2.2 * num_examples))
-per_snippet_means = []
-per_snippet_stds = []
-
-for i, idx in enumerate(example_indices):
-    snippet = all_snippets[idx]
-    plt.subplot(num_examples, 1, i + 1)
-
-    # Variante A: nur Lead 0 (wie im Testskript)
-    if snippet.ndim == 2 and snippet.shape[1] > 0:
-        plt.plot(snippet[:, 0], label=f"ECG_ID={all_ecg_ids[idx]}, Label={all_scp_labels_raw[idx]}")
-    else:
-        plt.plot(snippet, label=f"ECG_ID={all_ecg_ids[idx]}, Label={all_scp_labels_raw[idx]}")
-
-    # Stats berechnen und als Overlay anzeigen (wie im Testskript)
-    mean, std, vmin, vmax = snippet_stats(snippet)
-    per_snippet_means.append(mean)
-    per_snippet_stds.append(std)
-
-    ax = plt.gca()
-    x0, x1 = ax.get_xlim(); y0, y1 = ax.get_ylim()
-    txt = f"mean={mean:.3f}, std={std:.3f}, min={vmin:.3f}, max={vmax:.3f}"
-    ax.text(
-        x=x0 + 0.99*(x1 - x0),
-        y=y0 + 0.95*(y1 - y0),
-        s=txt, ha="right", va="top", fontsize=8,
-        bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=2)
-    )
-    plt.legend(loc="upper left", fontsize="x-small")
-
-plt.suptitle("Beispiele: Originale EKG-Snippets (Lead 0) mit Stats", fontsize=14)
-plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.savefig(snip_plot_file, dpi=150)
-plt.close()
-print(f"Plot gespeichert: {snip_plot_file}")
-
-# ---------------------------------------------------------------------
-# 4) Train/Test-Split (stratifiziert nach Label)
+# 4) Train/Test-Split OHNE Leakage (Patient-level Split)
 # ---------------------------------------------------------------------
 from sklearn.model_selection import train_test_split
-train_snippets, test_snippets, labels_train, labels_test, ecg_ids_train, ecg_ids_test = train_test_split(
-    all_snippets, all_scp_labels_raw, all_ecg_ids,
-    test_size=0.2, random_state=42, stratify=all_scp_labels_raw
+
+all_labels = np.asarray(all_scp_labels_raw)
+all_snips  = np.asarray(all_snippets)
+
+unique_patients = np.unique(all_patient_ids)
+
+# Für Stratify: pro Patient genau ein Label nehmen (PTB-XL hat oft mehrere ECGs pro Patient,
+# aber bei dir ist Label pro ECG konstant; wir nehmen einfach das erste vorkommende)
+patient_to_label = {}
+for pid in unique_patients:
+    idx = np.where(all_patient_ids == pid)[0][0]
+    patient_to_label[pid] = all_labels[idx]
+
+labels_per_patient = np.array([patient_to_label[pid] for pid in unique_patients])
+
+train_patients, test_patients = train_test_split(
+    unique_patients,
+    test_size=0.2,
+    random_state=42,
+    stratify=labels_per_patient
 )
+
+train_mask = np.isin(all_patient_ids, train_patients)
+test_mask  = np.isin(all_patient_ids, test_patients)
+
+train_snippets = all_snips[train_mask]
+test_snippets  = all_snips[test_mask]
+labels_train   = all_labels[train_mask]
+labels_test    = all_labels[test_mask]
+ecg_ids_train  = np.asarray(all_ecg_ids)[train_mask]
+ecg_ids_test   = np.asarray(all_ecg_ids)[test_mask]
+
+input_shape = (train_snippets.shape[1], train_snippets.shape[2])
+
+print(f"Split (PATIENT-level): train_snips={train_snippets.shape[0]} / test_snips={test_snippets.shape[0]}")
+print(f"Unique patients: train={len(np.unique(all_patient_ids[train_mask]))} / test={len(np.unique(all_patient_ids[test_mask]))}")
+print(f"Unique ecg_ids:   train={len(np.unique(ecg_ids_train))} / test={len(np.unique(ecg_ids_test))}")
+
+# harte Checks gegen Leakage:
+assert len(set(train_patients).intersection(set(test_patients))) == 0, "PATIENT Leakage!"
+assert len(set(ecg_ids_train).intersection(set(ecg_ids_test))) == 0, "ECG_ID Leakage!"
+print("✅ Kein Patient- oder ECG-Leakage.")
+
 import hashlib
 
 def snippet_fingerprint(x: np.ndarray) -> str:
-    # float32 + bytes -> stabiler Hash
     xb = np.asarray(x, dtype=np.float32).tobytes(order="C")
     return hashlib.sha256(xb).hexdigest()[:16]
 
-# Fingerprints einmal berechnen (nach dem Split)
 test_fps = np.array([snippet_fingerprint(s) for s in test_snippets])
 
-
-input_shape = (train_snippets.shape[1], train_snippets.shape[2])
-print(f"Split: train={train_snippets.shape[0]} / test={test_snippets.shape[0]}")
+single_label_mask_test = np.array([lab.count('-') == 0 for lab in labels_test])
+single_label_snippets_test = test_snippets[single_label_mask_test]
+single_label_labels_test   = labels_test[single_label_mask_test]
 
 # ---------------------------------------------------------------------
 # 5) Automatisierte Hyperparameter-Experimente (wie bisher, aber mehrere)
@@ -280,7 +279,7 @@ results_summary = []
 # ---------------------------------------------------------------------
 # Trainingsschleife
 # ---------------------------------------------------------------------
-for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
+for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments_subset:
     exp_name = (
         f"LD{latent_dim}_Emb{num_emb}_Cost{beta}_LR{lr:.0e}_"
         f"Epochs{epochs}_Batch{batch_size}"
@@ -352,20 +351,20 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments:
 
     # --- (b) Latent-Space ---
     if DO_PLOTS:
-        print(f"  → Single-Label-Snippets verfügbar: {len(single_label_labels)}")
-        if len(single_label_labels) > 0:
+        print(f"  → Single-Label-Snippets (TEST) verfügbar: {len(single_label_labels_test)}")
+        if len(single_label_labels_test) > 0:
             print("  → Visualisiere quantisierten Latent-Raum…")
             visualize_latent_space(
                 vq_vae_model,
-                single_label_snippets,
-                single_label_labels,
+                single_label_snippets_test,
+                single_label_labels_test,
                 n_components=getattr(config, "VIS_N_COMPONENTS", 3),
                 method=getattr(config, "VIS_METHOD", "TSNE"),
                 filename=str(run.run_dir / f"VQ-VAE_3d_latent_space_quantized_TSNE_{params_str}.html"),
                 params_info=params_str,
             )
         else:
-            print("Keine Single-Label-Snippets für die Latentraum-Visualisierung vorhanden.")
+            print("Keine Single-Label-Snippets (TEST) für die Latentraum-Visualisierung vorhanden.")
 
     # --- (c) Codebook Embeddings ---
     if DO_PLOTS:
@@ -418,6 +417,6 @@ summary_path = Path("runs") / f"summary_{datetime.datetime.now().strftime('%Y%m%
 with open(summary_path, "w") as f:
     json.dump(results_summary, f, indent=2)
 
-print(f"\nAlle {len(experiments)} Experimente abgeschlossen.")
+print(f"\nAlle {len(experiments_subset)} Experimente abgeschlossen.")
 print(f"→ Zusammenfassung gespeichert unter: {summary_path}")
 print("Code ist erfolgreich durchgelaufen.")
