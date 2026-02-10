@@ -18,6 +18,7 @@ from sklearn.manifold import TSNE
 from src.snippet_cache import get_cache_paths, load_cached_snippets
 from src.models import VQVAE
 from src.visualization import plot_ecg_reconstructions
+from collections import Counter, defaultdict
 
 
 # -----------------------------
@@ -147,7 +148,73 @@ def plot_codebook_usage(run_dir: Path, out_dir: Path) -> None:
     print(f"[OK] Codebook-Usage Plot gespeichert: {out}")
 
 
-def plot_latent_tsne(run_dir: Path, out_dir: Path, max_points: int = 5000, perplexity: int = 30, random_state: int = 42) -> None:
+def _filter_tsne_points(
+    X: np.ndarray,
+    labels: np.ndarray,
+    *,
+    only_single: bool = False,
+    whitelist: str | None = None,
+    top_k: int | None = None,
+    per_class: int | None = None,
+    seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray]:
+    labels = np.asarray(labels).astype(str)
+    X = np.asarray(X)
+
+    mask = np.ones(len(labels), dtype=bool)
+
+    if only_single:
+        mask &= np.array([lab.count("-") == 0 for lab in labels], dtype=bool)
+
+    if whitelist:
+        allowed = set([x.strip() for x in whitelist.split(",") if x.strip()])
+        mask &= np.array([lab in allowed for lab in labels], dtype=bool)
+
+    Xf = X[mask]
+    lf = labels[mask]
+
+    if len(lf) == 0:
+        return Xf, lf
+
+    if top_k is not None:
+        c = Counter(lf.tolist())
+        keep = set([lab for lab, _ in c.most_common(int(top_k))])
+        mk = np.array([lab in keep for lab in lf], dtype=bool)
+        Xf = Xf[mk]
+        lf = lf[mk]
+
+    if len(lf) == 0:
+        return Xf, lf
+
+    if per_class is not None:
+        rng = np.random.default_rng(seed)
+        idx_by_lab = defaultdict(list)
+        for i, lab in enumerate(lf):
+            idx_by_lab[lab].append(i)
+
+        chosen = []
+        for lab, idxs in idx_by_lab.items():
+            idxs = np.array(idxs, dtype=int)
+            n = min(int(per_class), len(idxs))
+            chosen.extend(rng.choice(idxs, size=n, replace=False).tolist())
+
+        chosen = np.array(sorted(chosen), dtype=int)
+        Xf = Xf[chosen]
+        lf = lf[chosen]
+
+    return Xf, lf
+
+def plot_latent_tsne(
+    run_dir: Path,
+    out_dir: Path,
+    max_points: int = 5000,
+    perplexity: int = 30,
+    random_state: int = 42,
+    only_single: bool = False,
+    top_k: int | None = None,
+    per_class: int | None = None,
+    whitelist: str | None = None,
+) -> None:
     emb_path = run_dir / "snippet_embeddings.npy"
     lab_path = run_dir / "snippet_labels.json"
 
@@ -156,7 +223,20 @@ def plot_latent_tsne(run_dir: Path, out_dir: Path, max_points: int = 5000, perpl
         return
 
     X = np.load(emb_path)  # (N, latent_dim)
-    labels = np.asarray(load_json(lab_path))
+    labels = np.asarray(load_json(lab_path)).astype(str)
+    
+    X, labs = _filter_tsne_points(
+        X, labels,
+        only_single=only_single,
+        whitelist=whitelist,
+        top_k=top_k,
+        per_class=per_class,
+        seed=random_state,
+    )
+    
+    if len(labs) == 0:
+        print("[WARN] t-SNE: nach Filter/Sampling keine Punkte übrig – skip.")
+        return
 
     if len(X) == 0:
         print("[WARN] snippet_embeddings ist leer.")
@@ -167,10 +247,10 @@ def plot_latent_tsne(run_dir: Path, out_dir: Path, max_points: int = 5000, perpl
         rng = np.random.default_rng(random_state)
         sel = rng.choice(n, size=max_points, replace=False)
         Xs = X[sel]
-        ls = labels[sel]
+        ls = labs[sel]
     else:
         Xs = X
-        ls = labels
+        ls = labs
 
     # t-SNE 2D
     eff_perp = min(perplexity, max(5, (len(Xs) - 1) // 3))
