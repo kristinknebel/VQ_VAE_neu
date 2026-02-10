@@ -22,9 +22,8 @@ conda activate tf_env
 cd /users/stud/knebelkr/masterarbeit/VQ_VAE_0602
 
 
-# === Range-Logik ===
-START=$((SLURM_ARRAY_TASK_ID * 6))
-END=$((START + 5))
+START=$SLURM_ARRAY_TASK_ID
+END=$SLURM_ARRAY_TASK_ID
 
 echo "--------------------------------------"
 echo "Starte Experimente ${START}-${END}"
