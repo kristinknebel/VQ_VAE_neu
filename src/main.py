@@ -233,6 +233,9 @@ single_label_mask_test = np.array([lab.count('-') == 0 for lab in labels_test])
 single_label_snippets_test = test_snippets[single_label_mask_test]
 single_label_labels_test   = labels_test[single_label_mask_test]
 
+np.save("cache/train_patients.npy", train_patients)
+np.save("cache/test_patients.npy", test_patients)
+
 # ---------------------------------------------------------------------
 # 5) Automatisierte Hyperparameter-Experimente (wie bisher, aber mehrere)
 # ---------------------------------------------------------------------
