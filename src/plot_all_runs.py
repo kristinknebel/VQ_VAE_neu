@@ -46,6 +46,11 @@ def main():
     ap.add_argument("--num_embeddings", type=int, default=None, help="Filter: NUM_EMBEDDINGS")
     ap.add_argument("--commitment_cost", type=float, default=None, help="Filter: COMMITMENT_COST")
     ap.add_argument("--learning_rate", type=float, default=None, help="Filter: LEARNING_RATE")
+    ap.add_argument("--tsne_only_single", action="store_true", help="Nur Single-Label (ohne '-') für t-SNE")
+    ap.add_argument("--tsne_top_k", type=int, default=None, help="Nur Top-K Labels (nach Häufigkeit) für t-SNE")
+    ap.add_argument("--tsne_per_class", type=int, default=None, help="Max. N Beispiele pro Label für t-SNE")
+    ap.add_argument("--tsne_whitelist", type=str, default=None,
+                help="Kommagetrennte Label-Liste, z.B. 'NORM,IMI,ASMI'")
     args = ap.parse_args()
 
     runs_root = Path(args.runs_dir)
@@ -78,7 +83,15 @@ def main():
         try:
             plot_training_history(rd, out_dir)
             plot_codebook_usage(rd, out_dir)
-            plot_latent_tsne(rd, out_dir, max_points=args.tsne_points, perplexity=args.tsne_perplexity)
+            plot_latent_tsne(
+                rd, out_dir,
+                max_points=args.tsne_points,
+                perplexity=args.tsne_perplexity,
+                only_single=args.tsne_only_single,
+                top_k=args.tsne_top_k,
+                per_class=args.tsne_per_class,
+                whitelist=args.tsne_whitelist,
+            )
             plot_reconstructions_from_cache(rd, out_dir, n_examples=args.n_recon)
         except Exception as e:
             print(f"[ERROR] Plot fehlgeschlagen für {rd}: {e}")
