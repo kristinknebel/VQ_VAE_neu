@@ -180,10 +180,8 @@ snippet_length, num_channels = all_snippets.shape[1], all_snippets.shape[2]
 print(f"Snippets: {all_snippets.shape} (Länge={snippet_length}, Kanäle={num_channels})")
 print(f"Anzahl Labels (roh): {len(all_scp_labels_raw)}")
 
-
-
 # ---------------------------------------------------------------------
-# 4) Train/Test-Split OHNE Leakage (Patient-level Split)
+# 4) Train/Test-Split OHNE Leakage (Patient-level, KEIN Stratify)
 # ---------------------------------------------------------------------
 from sklearn.model_selection import train_test_split
 
@@ -192,20 +190,12 @@ all_snips  = np.asarray(all_snippets)
 
 unique_patients = np.unique(all_patient_ids)
 
-# Für Stratify: pro Patient genau ein Label nehmen (PTB-XL hat oft mehrere ECGs pro Patient,
-# aber bei dir ist Label pro ECG konstant; wir nehmen einfach das erste vorkommende)
-patient_to_label = {}
-for pid in unique_patients:
-    idx = np.where(all_patient_ids == pid)[0][0]
-    patient_to_label[pid] = all_labels[idx]
-
-labels_per_patient = np.array([patient_to_label[pid] for pid in unique_patients])
-
+# Einfach zufälliger Patient-Split (kein Stratify!)
 train_patients, test_patients = train_test_split(
     unique_patients,
     test_size=0.2,
     random_state=42,
-    stratify=labels_per_patient
+    shuffle=True
 )
 
 train_mask = np.isin(all_patient_ids, train_patients)
@@ -220,14 +210,16 @@ ecg_ids_test   = np.asarray(all_ecg_ids)[test_mask]
 
 input_shape = (train_snippets.shape[1], train_snippets.shape[2])
 
-print(f"Split (PATIENT-level): train_snips={train_snippets.shape[0]} / test_snips={test_snippets.shape[0]}")
-print(f"Unique patients: train={len(np.unique(all_patient_ids[train_mask]))} / test={len(np.unique(all_patient_ids[test_mask]))}")
-print(f"Unique ecg_ids:   train={len(np.unique(ecg_ids_train))} / test={len(np.unique(ecg_ids_test))}")
+print(f"Split (PATIENT-level, no stratify):")
+print(f"  train_snips={train_snippets.shape[0]} / test_snips={test_snippets.shape[0]}")
+print(f"  unique patients: train={len(np.unique(train_patients))} / test={len(np.unique(test_patients))}")
+print(f"  unique ecg_ids: train={len(np.unique(ecg_ids_train))} / test={len(np.unique(ecg_ids_test))}")
 
-# harte Checks gegen Leakage:
+# Harte Leakage-Checks
 assert len(set(train_patients).intersection(set(test_patients))) == 0, "PATIENT Leakage!"
 assert len(set(ecg_ids_train).intersection(set(ecg_ids_test))) == 0, "ECG_ID Leakage!"
 print("✅ Kein Patient- oder ECG-Leakage.")
+
 
 import hashlib
 
