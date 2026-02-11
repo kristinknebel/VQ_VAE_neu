@@ -36,11 +36,13 @@ echo "--------------------------------------"
 # === Plots erzeugen ===
 # Passe bei Bedarf Parameter an (n_recon/tsne_points/only_latest/Filter)
 python -m src.plot_all_runs \
-  --runs_dir runs \
-  --out_subdir plots \
-  --n_recon 10 \
-  --tsne_points 5000 \
-  --tsne_perplexity 30
+  --runs_dir runs --only_latest \
+  --do_tsne --do_umap --dims both \
+  --tsne_points 5000 --tsne_perplexity 30 \
+  --only_single \
+  --whitelist "NORM,AFIB,AFLT,IMI,ASMI,AMI,ISC_,ISCAL,ISCIN,ISCIL,LVH,IVCD,IRBBB" \
+  --per_class 200
+
 
 echo "--------------------------------------"
 echo "Plot-Job abgeschlossen."
