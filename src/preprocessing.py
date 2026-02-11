@@ -151,7 +151,7 @@ def batch_process_relevant_ecgs(DATA_DIR, RELEVANT_ECG_PATH, DATABASE_PATH):
     list_relevant_ecg_ids = df_relevant_ecgs['ecg_id'].tolist()
 
     df_database = pd.read_csv(DATABASE_PATH)
-    ecg_id_to_filename = pd.Series(df_database['filename_lr'].values, index=df_database['ecg_id']).to_dict()
+    ecg_id_to_filename = pd.Series(df_database['filename_hr'].values, index=df_database['ecg_id']).to_dict()
 
     for ecg_id in list_relevant_ecg_ids:
         if ecg_id in ecg_id_to_filename:
