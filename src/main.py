@@ -408,7 +408,7 @@ for (latent_dim, num_emb, beta, lr, batch_size, epochs) in experiments_subset:
 # ---------------------------------------------------------------------
 # 6) Zusammenfassung speichern
 # ---------------------------------------------------------------------
-summary_path = Path("runs") / f"summary_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+summary_path = run.run_dir / "summary.json"
 with open(summary_path, "w") as f:
     json.dump(results_summary, f, indent=2)
 
