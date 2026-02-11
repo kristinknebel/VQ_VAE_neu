@@ -91,6 +91,7 @@ cache_params = {
     # "leads": "all",
     "normalization": "zscore_per_channel",
     "split_level": "patient_id",
+    "preprocessing_version": "v2_bandpass150_notch50",
 }
 
 # Daten-Version (ändert sich, wenn Eingabedaten sich ändern)
