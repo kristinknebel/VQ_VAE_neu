@@ -19,7 +19,17 @@ from src.snippet_cache import get_cache_paths, load_cached_snippets
 from src.models import VQVAE
 from src.visualization import plot_ecg_reconstructions
 from collections import Counter, defaultdict
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
+try:
+    import umap  # umap-learn
+except Exception:
+    umap = None
+    
+try:
+    import plotly.express as px
+except Exception:
+    px = None
 
 # -----------------------------
 # Helpers
@@ -206,16 +216,85 @@ def _filter_tsne_points(
 
     return Xf, lf
 
-def plot_latent_tsne(
+def _maybe_collapse_labels(ls: np.ndarray, *, collapse_top: int | None) -> np.ndarray:
+    """Wenn collapse_top gesetzt ist: Top-K Klassen behalten, Rest -> 'OTHER'."""
+    if collapse_top is None:
+        return ls
+    uniq, cnt = np.unique(ls, return_counts=True)
+    top = uniq[np.argsort(-cnt)[:int(collapse_top)]].tolist()
+    top_set = set(top)
+    return np.array([lab if lab in top_set else "OTHER" for lab in ls], dtype=object)
+
+
+def _subsample(X: np.ndarray, ls: np.ndarray, max_points: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    n = len(X)
+    if n <= max_points:
+        return X, ls
+    rng = np.random.default_rng(seed)
+    sel = rng.choice(n, size=max_points, replace=False)
+    return X[sel], ls[sel]
+
+
+def _plot_2d_png(Y: np.ndarray, ls: np.ndarray, out_png: Path, title: str) -> None:
+    plt.figure(figsize=(8, 6))
+    for lab in np.unique(ls):
+        m = (ls == lab)
+        plt.scatter(Y[m, 0], Y[m, 1], s=8, alpha=0.7, label=str(lab))
+    plt.title(title)
+    plt.xlabel("dim 1")
+    plt.ylabel("dim 2")
+    plt.legend(markerscale=2, fontsize="small", loc="best")
+    plt.tight_layout()
+    plt.savefig(out_png, dpi=150)
+    plt.close()
+    print(f"[OK] gespeichert: {out_png}")
+
+
+def _plot_3d_png(Y: np.ndarray, ls: np.ndarray, out_png: Path, title: str) -> None:
+    fig = plt.figure(figsize=(9, 7))
+    ax = fig.add_subplot(111, projection="3d")
+    for lab in np.unique(ls):
+        m = (ls == lab)
+        ax.scatter(Y[m, 0], Y[m, 1], Y[m, 2], s=8, alpha=0.7, label=str(lab))
+    ax.set_title(title)
+    ax.set_xlabel("dim 1")
+    ax.set_ylabel("dim 2")
+    ax.set_zlabel("dim 3")
+    ax.legend(markerscale=2, fontsize="small", loc="best")
+    plt.tight_layout()
+    plt.savefig(out_png, dpi=150)
+    plt.close()
+    print(f"[OK] gespeichert: {out_png}")
+
+
+def _plot_3d_html(Y: np.ndarray, ls: np.ndarray, out_html: Path, title: str) -> None:
+    if px is None:
+        print("[WARN] plotly nicht installiert -> kein 3D HTML.")
+        return
+    import pandas as pd
+    df = pd.DataFrame({"x": Y[:, 0], "y": Y[:, 1], "z": Y[:, 2], "label": ls.astype(str)})
+    fig = px.scatter_3d(df, x="x", y="y", z="z", color="label", title=title)
+    fig.write_html(str(out_html))
+    print(f"[OK] gespeichert: {out_html}")
+
+
+def plot_latent_embeddings(
     run_dir: Path,
     out_dir: Path,
+    *,
     max_points: int = 5000,
-    perplexity: int = 30,
+    tsne_perplexity: int = 30,
     random_state: int = 42,
+    do_tsne: bool = True,
+    do_umap: bool = True,
+    dims: str = "both",  # "2d" | "3d" | "both"
     only_single: bool = False,
+    whitelist: str | None = None,
     top_k: int | None = None,
     per_class: int | None = None,
-    whitelist: str | None = None,
+    collapse_other_top: int | None = None,
+    umap_neighbors: int = 15,
+    umap_min_dist: float = 0.1,
 ) -> None:
     emb_path = run_dir / "snippet_embeddings.npy"
     lab_path = run_dir / "snippet_labels.json"
@@ -224,9 +303,10 @@ def plot_latent_tsne(
         print(f"[WARN] snippet_embeddings.npy oder snippet_labels.json fehlen in {run_dir}")
         return
 
-    X = np.load(emb_path)  # (N, latent_dim)
+    X = np.load(emb_path)
     labels = np.asarray(load_json(lab_path)).astype(str)
-    
+
+    # Filter (Single-Label, whitelist, top_k, per_class)
     X, labs = _filter_tsne_points(
         X, labels,
         only_single=only_single,
@@ -235,55 +315,73 @@ def plot_latent_tsne(
         per_class=per_class,
         seed=random_state,
     )
-    
     if len(labs) == 0:
-        print("[WARN] t-SNE: nach Filter/Sampling keine Punkte übrig – skip.")
+        print("[WARN] Embedding-Plot: nach Filter/Sampling keine Punkte übrig – skip.")
         return
 
-    if len(X) == 0:
-        print("[WARN] snippet_embeddings ist leer.")
-        return
+    # Subsample auf max_points
+    Xs, ls = _subsample(X, labs, max_points=max_points, seed=random_state)
 
-    n = len(X)
-    if n > max_points:
-        rng = np.random.default_rng(random_state)
-        sel = rng.choice(n, size=max_points, replace=False)
-        Xs = X[sel]
-        ls = labs[sel]
-    else:
-        Xs = X
-        ls = labs
+    # Labels ggf. für Lesbarkeit zusammenfassen (optional)
+    ls_plot = _maybe_collapse_labels(ls, collapse_top=collapse_other_top)
 
-    # t-SNE 2D
-    eff_perp = min(perplexity, max(5, (len(Xs) - 1) // 3))
-    tsne = TSNE(
-        n_components=2,
-        perplexity=eff_perp,
-        init="pca",
-        learning_rate="auto",
-        random_state=random_state
-    )
-    Y = tsne.fit_transform(Xs)
+    want_2d = dims in ("2d", "both")
+    want_3d = dims in ("3d", "both")
 
-    # Labels -> Top-10 Klassen, Rest "OTHER"
-    uniq, cnt = np.unique(ls, return_counts=True)
-    top = uniq[np.argsort(-cnt)[:10]].tolist()
-    top_set = set(top)
-    ls_plot = np.array([lab if lab in top_set else "OTHER" for lab in ls], dtype=object)
+    # ---------- t-SNE ----------
+    if do_tsne:
+        if want_2d:
+            eff_perp = min(tsne_perplexity, max(5, (len(Xs) - 1) // 3))
+            tsne2 = TSNE(
+                n_components=2, perplexity=eff_perp,
+                init="pca", learning_rate="auto", random_state=random_state
+            )
+            Y2 = tsne2.fit_transform(Xs)
+            _plot_2d_png(Y2, ls_plot, out_dir / "latent_tsne_2d.png",
+                        f"Latent t-SNE 2D (n={len(Xs)}, perp={eff_perp})")
 
-    plt.figure(figsize=(8, 6))
-    for lab in np.unique(ls_plot):
-        m = (ls_plot == lab)
-        plt.scatter(Y[m, 0], Y[m, 1], s=8, alpha=0.7, label=str(lab))
-    plt.title(f"Latent t-SNE (n={len(Xs)}, perp={eff_perp})")
-    plt.xlabel("t-SNE 1")
-    plt.ylabel("t-SNE 2")
-    plt.legend(markerscale=2, fontsize="small", loc="best")
-    plt.tight_layout()
-    out = out_dir / "latent_tsne.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
-    print(f"[OK] Latent t-SNE Plot gespeichert: {out}")
+        if want_3d:
+            eff_perp = min(tsne_perplexity, max(5, (len(Xs) - 1) // 3))
+            tsne3 = TSNE(
+                n_components=3, perplexity=eff_perp,
+                init="pca", learning_rate="auto", random_state=random_state
+            )
+            Y3 = tsne3.fit_transform(Xs)
+            _plot_3d_png(Y3, ls_plot, out_dir / "latent_tsne_3d.png",
+                        f"Latent t-SNE 3D (n={len(Xs)}, perp={eff_perp})")
+            _plot_3d_html(Y3, ls_plot, out_dir / "latent_tsne_3d.html",
+                         f"Latent t-SNE 3D (n={len(Xs)}, perp={eff_perp})")
+
+    # ---------- UMAP ----------
+    if do_umap:
+        if umap is None:
+            print("[WARN] umap-learn nicht installiert -> skip UMAP.")
+        else:
+            reducer2 = None
+            reducer3 = None
+            if want_2d:
+                reducer2 = umap.UMAP(
+                    n_components=2,
+                    n_neighbors=int(umap_neighbors),
+                    min_dist=float(umap_min_dist),
+                    random_state=random_state,
+                )
+                U2 = reducer2.fit_transform(Xs)
+                _plot_2d_png(U2, ls_plot, out_dir / "latent_umap_2d.png",
+                            f"Latent UMAP 2D (n={len(Xs)}, nn={umap_neighbors}, min_dist={umap_min_dist})")
+
+            if want_3d:
+                reducer3 = umap.UMAP(
+                    n_components=3,
+                    n_neighbors=int(umap_neighbors),
+                    min_dist=float(umap_min_dist),
+                    random_state=random_state,
+                )
+                U3 = reducer3.fit_transform(Xs)
+                _plot_3d_png(U3, ls_plot, out_dir / "latent_umap_3d.png",
+                            f"Latent UMAP 3D (n={len(Xs)}, nn={umap_neighbors}, min_dist={umap_min_dist})")
+                _plot_3d_html(U3, ls_plot, out_dir / "latent_umap_3d.html",
+                             f"Latent UMAP 3D (n={len(Xs)}, nn={umap_neighbors}, min_dist={umap_min_dist})")
 
 
 def plot_reconstructions_from_cache(run_dir: Path, out_dir: Path, n_examples: int = 10, seed: int = 42) -> None:
@@ -361,6 +459,18 @@ def main():
     ap.add_argument("--n_recon", type=int, default=10, help="Anzahl Rekonstruktions-Beispiele")
     ap.add_argument("--tsne_points", type=int, default=5000, help="Max. Punkte für t-SNE")
     ap.add_argument("--tsne_perplexity", type=int, default=30, help="t-SNE Perplexity")
+    ap.add_argument("--only_single", action="store_true", help="Nur Single-Labels (keine Mischformen)")
+    ap.add_argument("--whitelist", type=str, default=None, help="Komma-getrennte Labels, z.B. 'NORM,IMI,AFIB'")
+    ap.add_argument("--top_k", type=int, default=None, help="Nur Top-K Labels nach Häufigkeit (nach Filter)")
+    ap.add_argument("--per_class", type=int, default=None, help="Max. Samples pro Klasse (nach Filter)")
+    ap.add_argument("--collapse_other_top", type=int, default=None, help="Nur Top-K Labels zeigen, Rest -> OTHER (für Lesbarkeit)")
+    
+    ap.add_argument("--do_tsne", action="store_true", help="t-SNE berechnen")
+    ap.add_argument("--do_umap", action="store_true", help="UMAP berechnen")
+    ap.add_argument("--dims", type=str, default="both", choices=["2d","3d","both"], help="2D/3D/both")
+    
+    ap.add_argument("--umap_neighbors", type=int, default=15)
+    ap.add_argument("--umap_min_dist", type=float, default=0.1)
     args = ap.parse_args()
 
     run_dir = Path(args.run_dir)
@@ -375,7 +485,22 @@ def main():
 
     plot_training_history(run_dir, out_dir)
     plot_codebook_usage(run_dir, out_dir)
-    plot_latent_tsne(run_dir, out_dir, max_points=args.tsne_points, perplexity=args.tsne_perplexity)
+    plot_latent_embeddings(
+        run_dir, out_dir,
+        max_points=args.tsne_points,
+        tsne_perplexity=args.tsne_perplexity,
+        random_state=42,
+        do_tsne=args.do_tsne,
+        do_umap=args.do_umap,
+        dims=args.dims,
+        only_single=args.only_single,
+        whitelist=args.whitelist,
+        top_k=args.top_k,
+        per_class=args.per_class,
+        collapse_other_top=args.collapse_other_top,
+        umap_neighbors=args.umap_neighbors,
+        umap_min_dist=args.umap_min_dist,
+    )
     plot_reconstructions_from_cache(run_dir, out_dir, n_examples=args.n_recon)
 
 
