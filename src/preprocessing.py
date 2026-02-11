@@ -9,6 +9,34 @@ from .config import DATA_DIR, RELEVANT_ECG_PATH, DATABASE_PATH, SAMPLING_RATE, S
 from .data_loader import get_scp_code_list
 #ecg_id_to_scp_list aus data_loader
 
+from scipy.signal import butter, filtfilt, iirnotch
+
+def bandpass_filter(x: np.ndarray, fs: float, low: float = 0.5, high: float = 150.0, order: int = 3) -> np.ndarray:
+    """
+    x: (T, C) oder (T,) float
+    """
+    nyq = 0.5 * fs
+    hi = min(high, nyq * 0.99)  # Sicherheitsklemme, falls fs klein ist
+    lo = max(low, 0.001)
+    if lo >= hi:
+        # bei sehr kleiner fs kann bandpass unmöglich sein -> dann lieber nur mean-Removal
+        return x
+
+    b, a = butter(order, [lo / nyq, hi / nyq], btype="band")
+    return filtfilt(b, a, x, axis=0)
+
+def notch_filter(x: np.ndarray, fs: float, f0: float = 50.0, Q: float = 30.0) -> np.ndarray:
+    """
+    Notch-Filter gegen Netzbrummen (typisch 50 Hz in DE/EU).
+    x: (T, C) oder (T,)
+    """
+    nyq = 0.5 * fs
+    w0 = f0 / nyq
+    if w0 <= 0.0 or w0 >= 1.0:
+        return x  # Samplingrate passt nicht für diese Notch
+    b, a = iirnotch(w0, Q)
+    return filtfilt(b, a, x, axis=0)
+  
 # ---- Funktion zum Erstellen von Snippets aus der EKG-Datei ----
 def create_snippets(filepath, ecg_id_to_scp_list,
                     SAMPLING_RATE, SNIPPET_LENGTH_BEFORE_R, SNIPPET_LENGTH_AFTER_R):
@@ -38,6 +66,11 @@ def create_snippets(filepath, ecg_id_to_scp_list,
     try:
         record = wfdb.rdrecord(file)
         full_ecg = record.p_signal  # shape (N, n_channels), float
+        # bandpass + notch (auf allen Kanälen)
+        
+        full_ecg = bandpass_filter(full_ecg, fs=SAMPLING_RATE, low=0.5, high=150.0, order=3).astype(np.float32, copy=False)
+        full_ecg = notch_filter(full_ecg, fs=SAMPLING_RATE, f0=50.0, Q=30.0).astype(np.float32, copy=False)
+
         n_samples, n_channels = full_ecg.shape
 
         # Referenzableitung für R-Peak-Detektion finden (bevorzugt "II")
