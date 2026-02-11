@@ -8,9 +8,9 @@ import numpy as np
 import tensorflow as tf
 
 def _now_tag() -> str:
-    return time.strftime("%Y%m%d_%H%M%S")
+    return time.strftime("%Y%m%d_%H%M%S") + f"_{int((time.time()%1)*1000):03d}_p{os.getpid()}"
 
-def _short_tag(params: Dict[str, Any], keys=("LATENT_DIM","NUM_EMBEDDINGS","COMMITMENT_COST","LEARNING_RATE","AE_BATCH_SIZE")) -> str:
+def _short_tag(params: Dict[str, Any], keys=("LATENT_DIMENSIONS", "LATENT_DIM", "NUM_EMBEDDINGS","COMMITMENT_COST","LEARNING_RATE","AE_BATCH_SIZE")) -> str:
     def fmt(k, v):
         if v is None: return ""
         if isinstance(v, float):
