@@ -36,6 +36,15 @@ def notch_filter(x: np.ndarray, fs: float, f0: float = 50.0, Q: float = 30.0) ->
         return x  # Samplingrate passt nicht für diese Notch
     b, a = iirnotch(w0, Q)
     return filtfilt(b, a, x, axis=0)
+
+def snr_db(x_signal: np.ndarray, x_noise: np.ndarray, eps: float = 1e-12) -> float:
+    """
+    SNR = 10*log10(P_signal / P_noise)
+    - x_signal, x_noise: (T, C) oder (T,)
+    """
+    ps = float(np.mean(np.square(x_signal), dtype=np.float64))
+    pn = float(np.mean(np.square(x_noise), dtype=np.float64))
+    return 10.0 * np.log10((ps + eps) / (pn + eps))
   
 # ---- Funktion zum Erstellen von Snippets aus der EKG-Datei ----
 def create_snippets(filepath, ecg_id_to_scp_list,
@@ -65,12 +74,18 @@ def create_snippets(filepath, ecg_id_to_scp_list,
     # Datensatz lesen
     try:
         record = wfdb.rdrecord(file)
-        full_ecg = record.p_signal  # shape (N, n_channels), float
-        # bandpass + notch (auf allen Kanälen)
+        full_ecg_raw = record.p_signal.astype(np.float32, copy=False)   # ungefiltert
+        full_ecg = full_ecg_raw
         
-        full_ecg = bandpass_filter(full_ecg, fs=SAMPLING_RATE, low=0.5, high=150.0, order=3).astype(np.float32, copy=False)
+        # notch + bandpass (auf allen Kanälen)
         full_ecg = notch_filter(full_ecg, fs=SAMPLING_RATE, f0=50.0, Q=30.0).astype(np.float32, copy=False)
-
+        full_ecg = bandpass_filter(full_ecg, fs=SAMPLING_RATE, low=0.5, high=150.0, order=3).astype(np.float32, copy=False)
+        
+        # --- SNR-Logging (gefiltertes Signal vs. herausgefilterter Anteil) ---
+        noise = (full_ecg_raw - full_ecg).astype(np.float32, copy=False)
+        snr = snr_db(full_ecg, noise)
+        print(f"[SNR] {base_ecg_id}: SNR(filtered vs removed) = {snr:.2f} dB")
+        
         n_samples, n_channels = full_ecg.shape
 
         # Referenzableitung für R-Peak-Detektion finden (bevorzugt "II")
