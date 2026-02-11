@@ -7,7 +7,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --mem=60G
 #SBATCH --cpus-per-task=4
-#SBATCH --partition=short
+#SBATCH --partition=defq
 #SBATCH --mail-user=knebelkr@hu-berlin.de
 #SBATCH --mail-type=END,FAIL
 
