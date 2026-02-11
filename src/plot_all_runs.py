@@ -10,7 +10,7 @@ from typing import List, Optional
 from src.plot_from_run import (
     plot_training_history,
     plot_codebook_usage,
-    plot_latent_tsne,
+    plot_latent_embeddings,   # <-- statt plot_latent_tsne
     plot_reconstructions_from_cache,
 )
 
@@ -46,11 +46,17 @@ def main():
     ap.add_argument("--num_embeddings", type=int, default=None, help="Filter: NUM_EMBEDDINGS")
     ap.add_argument("--commitment_cost", type=float, default=None, help="Filter: COMMITMENT_COST")
     ap.add_argument("--learning_rate", type=float, default=None, help="Filter: LEARNING_RATE")
-    ap.add_argument("--tsne_only_single", action="store_true", help="Nur Single-Label (ohne '-') für t-SNE")
-    ap.add_argument("--tsne_top_k", type=int, default=None, help="Nur Top-K Labels (nach Häufigkeit) für t-SNE")
-    ap.add_argument("--tsne_per_class", type=int, default=None, help="Max. N Beispiele pro Label für t-SNE")
-    ap.add_argument("--tsne_whitelist", type=str, default=None,
-                help="Kommagetrennte Label-Liste, z.B. 'NORM,IMI,ASMI'")
+    ap.add_argument("--only_single", action="store_true")
+    ap.add_argument("--whitelist", type=str, default=None)
+    ap.add_argument("--top_k", type=int, default=None)
+    ap.add_argument("--per_class", type=int, default=None)
+    ap.add_argument("--collapse_other_top", type=int, default=None)
+    
+    ap.add_argument("--do_tsne", action="store_true")
+    ap.add_argument("--do_umap", action="store_true")
+    ap.add_argument("--dims", type=str, default="both", choices=["2d","3d","both"])
+    ap.add_argument("--umap_neighbors", type=int, default=15)
+    ap.add_argument("--umap_min_dist", type=float, default=0.1)
     args = ap.parse_args()
 
     runs_root = Path(args.runs_dir)
@@ -83,14 +89,21 @@ def main():
         try:
             plot_training_history(rd, out_dir)
             plot_codebook_usage(rd, out_dir)
-            plot_latent_tsne(
+            plot_latent_embeddings(
                 rd, out_dir,
                 max_points=args.tsne_points,
-                perplexity=args.tsne_perplexity,
-                only_single=args.tsne_only_single,
-                top_k=args.tsne_top_k,
-                per_class=args.tsne_per_class,
-                whitelist=args.tsne_whitelist,
+                tsne_perplexity=args.tsne_perplexity,
+                random_state=42,
+                do_tsne=args.do_tsne,
+                do_umap=args.do_umap,
+                dims=args.dims,
+                only_single=args.only_single,
+                whitelist=args.whitelist,
+                top_k=args.top_k,
+                per_class=args.per_class,
+                collapse_other_top=args.collapse_other_top,
+                umap_neighbors=args.umap_neighbors,
+                umap_min_dist=args.umap_min_dist,
             )
             plot_reconstructions_from_cache(rd, out_dir, n_examples=args.n_recon)
         except Exception as e:
