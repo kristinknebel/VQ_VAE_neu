@@ -36,11 +36,21 @@ echo "--------------------------------------"
 # === Plots erzeugen ===
 # Passe bei Bedarf Parameter an (n_recon/tsne_points/only_latest/Filter)
 
+# Parameter-Grid
+TSNE_POINTS=(3000 5000 8000)
+TSNE_PERP=(20 30 40)
+
+UMAP_NEIGH=(5 15 30)
+UMAP_DIST=(0.1 0.5)
+
 for rd in \
   runs/20260212_170739_991_p2956471__L16_N256_C0_25_LR5e-04_A32 \
   runs/20260212_195934_057_p2994000__L32_N128_C0_5_LR5e-04_A32 \
 
 do
+
+  [ -d "$rd" ] || continue
+  echo "=== RUN $rd ==="
 
   for pts in "${TSNE_POINTS[@]}"; do
     for perp in "${TSNE_PERP[@]}"; do
@@ -57,6 +67,7 @@ do
             --umap_neighbors "$nn" \
             --umap_min_dist "$md" \
             --only_single \
+            --whitelist "NORM,AFIB,AFLT,IMI,ASMI,AMI,ISC_,ISCAL,ISCIN,ISCIL,LVH,IVCD,IRBBB" \
             --per_class 200
 
         done
@@ -64,8 +75,12 @@ do
     done
   done
 
-#--whitelist "NORM,AFIB,AFLT,IMI,ASMI,AMI,ISC_,ISCAL,ISCIN,ISCIL,LVH,IVCD,IRBBB" \
 
+#--whitelist "NORM,AFIB,AFLT,IMI,ASMI,AMI,ISC_,ISCAL,ISCIN,ISCIL,LVH,IVCD,IRBBB" \
+#--tsne_points 5000 = Downsampling für Rechenzeit + Lesbarkeit
+#--tsne_perplexity 30 = typische Neighborhood-Größe für stabile Cluster
+#--umap_neighbors 15 (stadard)
+#--umap_min_dist 0.1 (standard)
 echo "--------------------------------------"
 echo "Plot-Job abgeschlossen."
 echo "--------------------------------------"
