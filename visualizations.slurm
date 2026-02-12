@@ -47,7 +47,6 @@ do
     --do_tsne --do_umap --dims both \
     --tsne_points 5000 --tsne_perplexity 30 \
     --only_single \
-    #--whitelist "NORM,AFIB,AFLT,IMI,ASMI,AMI,ISC_,ISCAL,ISCIN,ISCIL,LVH,IVCD,IRBBB" \
     --per_class 200
 done
 
