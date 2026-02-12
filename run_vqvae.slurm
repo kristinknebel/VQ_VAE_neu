@@ -18,6 +18,11 @@ set -euo pipefail
 source /opt/conda/etc/profile.d/conda.sh
 conda activate tf_env
 
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
 # === Ins Projektverzeichnis wechseln ===
 cd /users/stud/knebelkr/masterarbeit/VQ_VAE_0602
 
