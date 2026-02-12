@@ -14,9 +14,9 @@ print(DATA_DIR)
 print(RELEVANT_ECG_PATH)
 print(DATABASE_PATH)
 # --- EKG-Verarbeitungsparameter ---
-SAMPLING_RATE = 100  # PTB-XL Sampling Rate
-SNIPPET_LENGTH_BEFORE_R = 20 #200ms vor R-Peak
-SNIPPET_LENGTH_AFTER_R = 40 #400ms nach R-Peak
+SAMPLING_RATE = 500  # PTB-XL Sampling Rate high resolution
+SNIPPET_LENGTH_BEFORE_R = 100 #200ms vor R-Peak
+SNIPPET_LENGTH_AFTER_R = 200 #400ms nach R-Peak
 MIN_SNIPPETS_PER_FILE = 5 # Mindestanzahl von Snippets pro Datei
 
 # --- Autoencoder-Parameter ---
