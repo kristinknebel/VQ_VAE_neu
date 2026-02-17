@@ -34,7 +34,7 @@ do
     --run_dir "$rd" \
     --do_tsne --do_umap --dims both \
     --tsne_points 5000 --tsne_perplexity 30 \
-    --umap_neigh 15 --umap_dist 0.5 \
+    --umap_neighbors 15 --umap_min_dist 0.5 \
     --only_single \
     --per_class 200
 done
