@@ -22,8 +22,12 @@ export PYTHONPATH="$PWD"
 #UMAP_NEIGH=(5 15 30)
 #UMAP_DIST=(0.1 0.5)
 
-for rd in runs/20260212_{17,18,19,20,21,22,23}*
+shopt -s nullglob
+for rd in runs/20260212_*
 do
+  [ -d "$rd" ] || continue
+  base=$(basename "$rd")
+  [[ "$base" < "20260212_170000" ]] && continue
 
 
   echo "=== PLOTTING $rd ==="
